@@ -1,8 +1,15 @@
 # re-phigros
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 ## Description
 
 **The main project of RE:Phigros a.k.a. Phi:Re**
+
+## Requirements
+
+- Unity 2021.3.x LTS or later
+- Android SDK / iOS Xcode
 
 ## Code Standards
 
@@ -21,3 +28,11 @@
 **Never** commit directly to the `master` branch.
 
 **Never** try to merge a branch without issuing a pr.
+
+## Contributing
+
+Issues and Pull Requests are welcome. Please read the code standards and git standards above before submitting.
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
