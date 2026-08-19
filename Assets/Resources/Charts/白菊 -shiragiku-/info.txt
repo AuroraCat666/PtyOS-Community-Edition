@@ -1,0 +1,10 @@
+#
+Name: 白菊 -shiragiku-
+Path: 54295570
+Song: 54295570.ogg
+Picture: 54295570.png
+Chart: 54295570.json
+Level: Impossible
+Composer: QAQ
+Charter: CosyJester
+Illustrator: Convert by MVP

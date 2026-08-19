@@ -1,0 +1,8 @@
+{
+  "Servers": [
+    {
+      "Custom-Name": "PtyOS 社区服务器",
+      "Url": "ptyos.yuncishu.xyz:26377"
+    }
+  ]
+}

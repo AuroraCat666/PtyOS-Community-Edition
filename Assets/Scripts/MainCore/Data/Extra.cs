@@ -1,0 +1,86 @@
+﻿using System;
+using System.Collections.Generic;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using UnityEngine;
+
+namespace MainCore.Data
+{
+    [Serializable]
+    public class Bpm
+    {
+        public int[] time { get; set; }
+        public float bpm { get; set; }
+    }
+
+    [Serializable]
+    public class BpmEvent
+    {
+        public float start;
+        public float end;
+        public float bpm;
+
+        public BpmEvent(float b, float s)
+        {
+            bpm = b;
+            start = s;
+            end = 1e9f;
+           
+        }
+    }
+
+    [Serializable]
+    public class Video
+    {
+        public string path { get; set; }
+        public int[] time { get; set; } = Array.Empty<int>();
+        [JsonIgnore] public float realTime { get; set; }
+        public string scale { get; set; } = "cropCenter";
+        public float alpha { get; set; } = 1.0f;
+        public float dim { get; set; } = 0.3f;
+        [JsonIgnore] public ScaleMode ScaleMode { get; set; }
+    }
+
+    [Serializable]
+    public class Effect
+    {
+        public int[] start { get; set; }
+        public float startTime { get; set; }
+        public int[] end { get; set; }
+        public float endTime { get; set; }
+        public string shader { get; set; }
+        public bool global { get; set; }
+        public JObject vars { get; set; }
+        public ExtraPropertyType[] varTypes { get; set; }
+
+        public enum ExtraPropertyType
+        {
+            Undefined = 0,
+            Decimal = 1,
+            ExtraList = 2
+        }
+    }
+
+    [Serializable]
+    public class Value
+    {
+        public int[] startTime { get; set; }
+        public int[] endTime { get; set; }
+        public int easingType { get; set; } = 1;
+        public float easingLeft { get; set; } = 0;
+        public float easingRight { get; set; } = 1;
+        public float start { get; set; }
+        public float end { get; set; }
+
+        public float realStartTime { get; set; } = -1;
+        public float realEndTime { get; set; } = -1;
+    }
+
+    [Serializable]
+    public class Extra
+    {
+        [JsonProperty("bpm")] public List<Bpm> Bpm { get; set; }
+        [JsonProperty("videos")] public List<Video> Videos { get; set; }
+        [JsonProperty("effects")] public List<Effect> Effects { get; set; }
+    }
+}
