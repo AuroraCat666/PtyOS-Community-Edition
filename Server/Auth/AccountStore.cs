@@ -269,7 +269,8 @@ public class AccountStore
     }
 
     public static bool IsValidUsername(string username)
-        => username.Length is >= 3 and <= 24 && username.All(c => char.IsLetterOrDigit(c) || c is '_' or '-');
+        => username.Length is >= 3 and <= 24 && username.All(c =>
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c is '_' or '-');
 
     private static string HashPassword(string password)
     {
