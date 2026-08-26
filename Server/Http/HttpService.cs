@@ -265,7 +265,7 @@ public static class HttpService
 
             if (path == "/api/community/status")
             {
-                WriteJson(ctx, new { serverName = config.ServerName, motd = config.ServerMotd, roomState = rooms.GetCommunitySnapshot() });
+                WriteJson(ctx, new { serverName = config.ServerName, motd = config.ServerMotd, roomState = rooms.GetCommunitySnapshot(), memberCount = accounts.GetAll().Count });
                 return;
             }
 
