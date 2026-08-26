@@ -41,6 +41,9 @@ namespace MainCore.Data
         public List<noteControl> yControl = new();
         public List<noteControl> alphaControl = new();
         public string attachUI = "**tHiSisnOne AtTaCH U_i TEmPlAtE**";
+        public bool isG1f = false;
+        public Vector2 anchor = new Vector2(0.5f, 0.5f);
+        public float bpmfactor = 1.0f;
 
         public void PushNote(int type, bool isAbove, float time, float posX, double speed, double floorPos,
             float holdTime = 0, bool isFake = false, float yOffset = 0, float size = 1, float visibleTime = 99999f,
@@ -240,6 +243,7 @@ namespace MainCore.Data
         public List<judgeLineEvent> paintEvents = new();
         public List<judgeLineTextEvent> textEvents = new();
         public List<judgeLineEvent> inclineEvents = new();
+        public List<judgeLineEvent> gifEvents = new();
     }
 
     [Serializable]
@@ -286,7 +290,7 @@ namespace MainCore.Data
             public string attachUI = "**tHiSisnOne AtTaCH U_i TEmPlAtE**";
             public int numOfNotes;
             public List<RpeEventLayer> eventLayers = new();
-            public RpeEventLayerExtended extended;
+            public RpeEventLayerExtended extended = new();
             public List<RpeNoteSet> notes = new();
             public int father = -1;
             public int zOrder = 0;
@@ -296,6 +300,9 @@ namespace MainCore.Data
             public List<RpeSkewControl> skewControl = new();
             public List<RpeYControl> yControl = new();
             public List<RpeAlphaControl> alphaControl = new();
+            public bool isG1f = false;
+            public Vector2 anchor = new Vector2(0.5f, 0.5f);
+            public float bpmfactor = 1.0f;
         }
 
         [Serializable]
@@ -333,6 +340,7 @@ namespace MainCore.Data
             public List<RpeValueSet> paintEvents = new();
             public List<RpeTextEvent> textEvents = new();
             public List<RpeValueSet> inclineEvents = new();
+            public List<RpeValueSet> gifEvents = new();
         }
 
         [Serializable]

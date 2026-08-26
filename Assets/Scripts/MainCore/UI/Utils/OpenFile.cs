@@ -2,6 +2,9 @@
 using System.Collections.Generic;
 using SFB;
 using SimpleFileBrowser;
+#if UNITY_ANDROID && !UNITY_EDITOR
+using MainCore.Utilities;
+#endif
 
 namespace MainCore.UI.Utils
 {
@@ -32,7 +35,14 @@ namespace MainCore.UI.Utils
             return;
 #endif
             FileBrowser.SetFilters(true);
-            FileBrowser.ShowLoadDialog(paths => onSuccess.Invoke(paths[0]), onCancel, FileBrowser.PickMode.Folders,
+            FileBrowser.ShowLoadDialog(paths =>
+            {
+                string path = paths[0];
+#if UNITY_ANDROID && !UNITY_EDITOR
+                path = AndroidStorageUtil.SAFUriToRealPath(path);
+#endif
+                onSuccess.Invoke(path);
+            }, onCancel, FileBrowser.PickMode.Folders,
                 false, initPath, "", title,
                 buttonText);
         }
@@ -61,7 +71,14 @@ namespace MainCore.UI.Utils
             return;
 #endif
             FileBrowser.SetFilters(false, ParseSimpleFileBrowserFilter(filter));
-            FileBrowser.ShowLoadDialog(paths => onSuccess.Invoke(paths[0]), onCancel, FileBrowser.PickMode.Files, false,
+            FileBrowser.ShowLoadDialog(paths =>
+            {
+                string path = paths[0];
+#if UNITY_ANDROID && !UNITY_EDITOR
+                path = AndroidStorageUtil.SAFUriToRealPath(path);
+#endif
+                onSuccess.Invoke(path);
+            }, onCancel, FileBrowser.PickMode.Files, false,
                 initPath, "", title,
                 buttonText);
         }
@@ -90,7 +107,14 @@ namespace MainCore.UI.Utils
             return;
 #endif
             FileBrowser.SetFilters(false, ParseSimpleFileBrowserFilter(filter));
-            FileBrowser.ShowSaveDialog(paths => onSuccess.Invoke(paths[0]), onCancel, FileBrowser.PickMode.Files, false,
+            FileBrowser.ShowSaveDialog(paths =>
+            {
+                string path = paths[0];
+#if UNITY_ANDROID && !UNITY_EDITOR
+                path = AndroidStorageUtil.SAFUriToRealPath(path);
+#endif
+                onSuccess.Invoke(path);
+            }, onCancel, FileBrowser.PickMode.Files, false,
                 initPath, "", title,
                 buttonText);
         }

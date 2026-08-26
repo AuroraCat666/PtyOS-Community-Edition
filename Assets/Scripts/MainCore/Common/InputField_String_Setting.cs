@@ -17,12 +17,13 @@ namespace MainCore.Common
 
         public override void SetValue(string value)
         {
+            if (DataContainer.isFocused) DataContainer.DeactivateInputField();
             DataContainer.text = value;
         }
 
         public override void SaveValue()
         {
-            if (!gameObject.activeSelf) Debug.Log("qwq");
+            if (DataContainer.isFocused) DataContainer.DeactivateInputField();
             PlayerPrefs.SetString(dataTag, DataContainer.text);
         }
     }

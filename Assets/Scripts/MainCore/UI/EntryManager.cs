@@ -49,7 +49,60 @@ namespace MainCore.UI
                 await new WaitForSeconds(0.01f);
                 Resources.Load<Sprite>("1920x1080_Black");
             });
+#if UNITY_ANDROID && !UNITY_EDITOR
+            UniTask.Void(async () =>
+            {
+                await UniTask.Delay(1500);
+                CheckExternalStoragePermission();
+            });
+#endif
         }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private void CheckExternalStoragePermission()
+        {
+            try
+            {
+                using (var buildVersion = new AndroidJavaClass("android.os.Build$VERSION"))
+                {
+                    int sdkInt = buildVersion.GetStatic<int>("SDK_INT");
+                    if (sdkInt < 30) return;
+                }
+
+                using (var environment = new AndroidJavaClass("android.os.Environment"))
+                {
+                    if (environment.CallStatic<bool>("isExternalStorageManager")) return;
+                }
+
+                InGameUIManager.ShowModalWindowWithClose("权限",
+                    "需要开启「所有文件访问」权限才能读取谱面目录\n请点击确定，并在系统设置中允许该权限", () =>
+                    {
+                        try
+                        {
+                            using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                            using (var uriClass = new AndroidJavaClass("android.net.Uri"))
+                            {
+                                var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+                                var intent = new AndroidJavaObject("android.content.Intent",
+                                    "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION");
+                                var uri = uriClass.CallStatic<AndroidJavaObject>("fromParts", "package",
+                                    Application.identifier, null);
+                                intent.Call<AndroidJavaObject>("setData", uri);
+                                activity.Call("startActivity", intent);
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogException(e);
+                        }
+                    }, "确定");
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+            }
+        }
+#endif
 
         private void Start()
         {

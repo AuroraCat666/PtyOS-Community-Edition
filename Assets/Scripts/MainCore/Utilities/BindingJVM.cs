@@ -5,7 +5,7 @@ namespace MainCore.Utilities
 #if UNITY_ANDROID && !UNITY_EDITOR
         public static string GetFileDir()
         {
-            using var javaClass = new UnityEngine.AndroidJavaClass("com.totorowldox.REPhityOS.PathUtil");
+            using var javaClass = new UnityEngine.AndroidJavaClass("xyz.Yuncishu.ptyOS.PathUtil");
             return javaClass.CallStatic<string>("getFileDir");
         }
 #else

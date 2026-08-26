@@ -1,4 +1,4 @@
-package com.totorowldox.REPhityOS;
+package xyz.Yuncishu.ptyOS;
 
 import com.unity3d.player.UnityPlayerActivity;
 
@@ -12,7 +12,7 @@ import android.net.Uri;
 import android.database.Cursor;
 import android.provider.OpenableColumns;
 
-import com.totorowldox.REPhityOS.AndroidInterface;
+import xyz.Yuncishu.ptyOS.AndroidInterface;
 
 import java.io.File;
 import java.io.FileOutputStream;

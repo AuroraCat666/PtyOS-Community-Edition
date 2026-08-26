@@ -375,6 +375,11 @@ namespace MainCore.Utilities
         public static async Task<(Chart, float[])> Chart123(string chart, bool showMessage, List<int[]> list)
         {
             RpeChartData rpeChartData = JsonUtility.FromJson<RpeChartData>(chart);
+            Debug.Log($"[Rpe2Json] 反序列化完成: judgeLineList.Count={rpeChartData?.judgeLineList?.Count}, META.RPEVersion={rpeChartData?.META?.RPEVersion}, notes总数={rpeChartData?.judgeLineList?.Sum(x => x.notes?.Count ?? 0)}");
+            if (rpeChartData == null || rpeChartData.judgeLineList == null || rpeChartData.judgeLineList.Count == 0)
+            {
+                Debug.LogError($"[Rpe2Json] judgeLineList 为空，反序列化可能失败！");
+            }
             Chart retChart = new Chart();
             retChart.formatVersion = 1919810;
             var bpms = new List<BpmEvent>();
@@ -428,6 +433,10 @@ namespace MainCore.Utilities
                     retChart.judgeLineList[i].attachUI = rpeChartData.judgeLineList[i].attachUI;
                 }
 
+                retChart.judgeLineList[i].isG1f = rpeChartData.judgeLineList[i].isG1f;
+                retChart.judgeLineList[i].anchor = rpeChartData.judgeLineList[i].anchor;
+                retChart.judgeLineList[i].bpmfactor = rpeChartData.judgeLineList[i].bpmfactor;
+
                 //Convert extended
                 if (rpeChartData.judgeLineList[i].Texture != "line.png")
                 {
@@ -445,7 +454,8 @@ namespace MainCore.Utilities
                         await UniTask.SwitchToMainThread();
                         var t2d = new Texture2D(512, 270);
                         t2d.LoadImage(bytes);
-                        Sprite sprite = Sprite.Create(t2d, new Rect(0, 0, t2d.width, t2d.height), Vector2.one / 2f);
+                        var anchor = rpeChartData.judgeLineList[i].anchor;
+                        Sprite sprite = Sprite.Create(t2d, new Rect(0, 0, t2d.width, t2d.height), anchor);
                         retChart.judgeLineList[i].customImage = sprite;
                     }
                 }
@@ -504,6 +514,20 @@ namespace MainCore.Utilities
                     {
                         start = e.start,
                         end = e.end,
+                        startTime = RecalcTime(bpms, e.startTime.Frac()),
+                        endTime = RecalcTime(bpms, e.endTime.Frac()),
+                        easeType = e.easingType == 0 ? 1 : e.easingType,
+                        easingLeft = e.easingLeft,
+                        easingRight = e.easingRight
+                    });
+                }
+
+                foreach (var e in rpeChartData.judgeLineList[i].extended.gifEvents)
+                {
+                    retChart.judgeLineList[i].extended.gifEvents.Add(new judgeLineEvent
+                    {
+                        start = Mathf.Clamp01(e.start),
+                        end = Mathf.Clamp01(e.end),
                         startTime = RecalcTime(bpms, e.startTime.Frac()),
                         endTime = RecalcTime(bpms, e.endTime.Frac()),
                         easeType = e.easingType == 0 ? 1 : e.easingType,
@@ -831,6 +855,37 @@ namespace MainCore.Utilities
                             0, RecalcTime(bpms, t.endTime.Frac()) - RecalcTime(bpms, t.startTime.Frac()), t.isFake,
                             t.yOffset / 450f / 1.08f, t.size, t.visibleTime, t.alpha / 255f);
                     }
+                }
+
+                //Apply per-line bpmfactor (time scale for this judge line)
+                float bpmFactor = retChart.judgeLineList[i].bpmfactor;
+                if (Mathf.Abs(bpmFactor - 1f) > 0.0001f)
+                {
+                    foreach (var n in retChart.judgeLineList[i].notesAbove)
+                    {
+                        n.time *= bpmFactor;
+                        n.holdTime *= bpmFactor;
+                    }
+                    foreach (var n in retChart.judgeLineList[i].notesBelow)
+                    {
+                        n.time *= bpmFactor;
+                        n.holdTime *= bpmFactor;
+                    }
+                    foreach (var layer in retChart.judgeLineList[i].rpeLayers)
+                    {
+                        foreach (var e in layer.alphaEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                        foreach (var e in layer.moveXEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                        foreach (var e in layer.moveYEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                        foreach (var e in layer.rotateEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                        foreach (var e in layer.speedEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                    }
+                    var ext = retChart.judgeLineList[i].extended;
+                    foreach (var e in ext.scaleXEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                    foreach (var e in ext.scaleYEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                    foreach (var e in ext.colorEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                    foreach (var e in ext.textEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                    foreach (var e in ext.inclineEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
+                    foreach (var e in ext.gifEvents) { e.startTime *= bpmFactor; e.endTime *= bpmFactor; }
                 }
             }
 

@@ -36,7 +36,7 @@ namespace MainCore.PostProcessing
                 e.shader = e.shader.Substring(e.shader.Replace('\\', '/')
                     .IndexOf("/", StringComparison.InvariantCulture) + 1).FirstToLowerInvariant();
                 LoadShader(i, e.shader);
-                if (e.vars.Count == 0) return;
+                if (e.vars == null || e.vars.Count == 0) continue;
                 e.varTypes = new Effect.ExtraPropertyType[e.vars.Count];
                 int j = 0;
                 foreach (var v in e.vars)
@@ -162,7 +162,8 @@ namespace MainCore.PostProcessing
             if (!shaders.TryGetValue(shaderName, out var shader))
             {
                 shader = Shader.Find($"Phira/{shaderName}");
-                shaders.Add(shaderName, shader);
+                if (shader != null)
+                    shaders.Add(shaderName, shader);
             }
 
             if (shader != null)
@@ -194,7 +195,18 @@ namespace MainCore.PostProcessing
                 }
                 catch
                 {
-                    Debug.LogError($"[ExtraShaderProvider] Property {propertyName} in {shaderName} of type {property.GetType()} is not supported");
+                    try
+                    {
+                        if (property is JArray && ((JArray)property).Count is >= 3 and <= 4)
+                        {
+                            property.ToObject<Color>();
+                            return Effect.ExtraPropertyType.Color;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                    Debug.LogWarning($"[ExtraShaderProvider] Property {propertyName} in {shaderName} of type {property.GetType()} is not supported");
                     return Effect.ExtraPropertyType.Undefined;
                 }
             }
@@ -235,6 +247,10 @@ namespace MainCore.PostProcessing
                             value.start, value.end, value.easingLeft, value.easingRight);
                         mat.SetFloat($"_{propertyName}", f);
                     }
+                    break;
+                case Effect.ExtraPropertyType.Color:
+                    var color = property.ToObject<Color>();
+                    mat.SetColor($"_{propertyName}", color);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(type), type, null);

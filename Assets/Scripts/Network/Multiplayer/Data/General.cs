@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -25,69 +24,69 @@ namespace Network.Multiplayer.Data
             return socket.Send(NoBomUtf8Encoding.GetBytes(messageToSend));
         }
 
+        private static readonly List<byte> ReceiveBuffer = new List<byte>();
+
         public static JObject[]? Receive(this Socket socket)
         {
             if (socket.Available <= 0) return null;
-            byte[] buffer = new byte[8];
-            List<byte> dataList = new List<byte>();
-            int length;
+            byte[] buffer = new byte[16384];
             while (socket.Available > 0)
             {
-                while ((length = socket.Receive(buffer)) > 0)
-                {
-                    dataList.AddRange(buffer.Take(length));
-
-                    if (socket.Available <= 0 || length < buffer.Length) break;
-                }
-
-                if (dataList.Count == 0) throw new NullReferenceException("Received Nothing");
+                int length = socket.Receive(buffer);
+                if (length <= 0) break;
+                ReceiveBuffer.AddRange(buffer.Take(length));
             }
 
-            string s = NoBomUtf8Encoding.GetString(dataList.ToArray());
-            Debug.Log("接收到：" + s);
-            return SplitSocketPacks(s);
+            return ExtractCompletePacks();
         }
 
-        private static JObject[] SplitSocketPacks(string s)
+        /// <summary>
+        /// 从接收缓冲中提取所有完整 JSON 包，未完整的数据包保留在缓冲中等待下次接收。
+        /// 在字节层面扫描（{ } " \ 均为单字节 ASCII，不会与 UTF-8 多字节字符混淆），
+        /// 避免 TCP 分片与 UTF-8 跨包截断导致的丢包和解析异常。
+        /// </summary>
+        private static JObject[] ExtractCompletePacks()
         {
             List<JObject> packs = new List<JObject>();
             bool zhuanYi = false;
             bool isInString = false;
-            int j = 0;
-            TextElementEnumerator textElementEnumerator = StringInfo.GetTextElementEnumerator(s);
-            StringBuilder stringBuilder = new StringBuilder();
-            while (textElementEnumerator.MoveNext())
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i < ReceiveBuffer.Count; i++)
             {
-                string element = textElementEnumerator.GetTextElement();
-                if (stringBuilder.Length == 0 && element != "{") throw new ArgumentException("你这包有问题啊");
-                if (element == "\\")
+                byte b = ReceiveBuffer[i];
+                if (b == (byte)'\\')
                 {
-                    if (!isInString) throw new ArgumentException();
-                    zhuanYi = !zhuanYi;
+                    if (isInString) zhuanYi = !zhuanYi;
+                    continue;
                 }
-                else
+                if (b == (byte)'"')
                 {
-                    if (element == "\"")
-                    {
-                        if (!zhuanYi)
-                            isInString = !isInString;
-                    }
-                    else if (!isInString)
-                    {
-                        if (element == "{") j++;
-                        if (element == "}") j--;
-                    }
-
+                    if (!zhuanYi) isInString = !isInString;
                     zhuanYi = false;
+                    continue;
                 }
-
-                stringBuilder.Append(element);
-                if (j != 0) continue;
-                string s1 = stringBuilder.ToString();
-                packs.Add(JObject.Parse(s1));
-                stringBuilder.Clear();
+                if (!isInString)
+                {
+                    if (b == (byte)'{') depth++;
+                    else if (b == (byte)'}') depth--;
+                }
+                zhuanYi = false;
+                if (depth == 0 && i > start)
+                {
+                    string json = NoBomUtf8Encoding.GetString(ReceiveBuffer.GetRange(start, i - start + 1).ToArray());
+                    try
+                    {
+                        packs.Add(JObject.Parse(json));
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError("无法解析服务器数据包（已忽略）：" + json + "\n" + e.Message);
+                    }
+                    start = i + 1;
+                }
             }
-
+            if (start > 0) ReceiveBuffer.RemoveRange(0, start);
             return packs.ToArray();
         }
 

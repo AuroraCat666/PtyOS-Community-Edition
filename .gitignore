@@ -84,3 +84,9 @@ rsa-*
 # Temp files
 *.psd
 UpgradeLog*.htm
+
+# Charts backup / recovery
+Assets/ChartsBackup/
+Assets/_Recovery/
+*.bak
+

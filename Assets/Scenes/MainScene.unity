@@ -1169,6 +1169,13 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7310390997171621134, guid: 89aa6f2af8504a44690684146048e2eb,
         type: 3}
+      propertyPath: m_Text
+      value: 'PtyOS(Community Edition.) V0.4 by kagari939 & Yuncishu
+
+'
+      objectReference: {fileID: 0}
+    - target: {fileID: 7310390997171621134, guid: 89aa6f2af8504a44690684146048e2eb,
+        type: 3}
       propertyPath: m_FontData.m_FontSize
       value: 40
       objectReference: {fileID: 0}

@@ -84,7 +84,6 @@ namespace MainCore.Common
                 default:
                     throw new ArgumentOutOfRangeException();
             }
-            OnSceneClosing?.RemoveAllListeners();
         }
 
         public async void LoadAdditiveScene(string sceneName)

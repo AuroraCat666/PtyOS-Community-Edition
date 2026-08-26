@@ -60,6 +60,12 @@ namespace MainCore
                 CalculatedTimes = times is { Count: > 0 } ? new float[times.Count] : Array.Empty<float>();
                 await InitRpeChart(rawChart, showMessage, times);
             }
+            else if (rawChart.Contains("}") && (rawChart.Contains("RPEVersion") || rawChart.Contains("judgeLineList") || rawChart.Contains("BPMList")))
+            {
+                // 部分 RPE 谱面 JSON 不含 "numOfNotes" 字段名，需按 RPEVersion/judgeLineList/BPMList 识别
+                CalculatedTimes = times is { Count: > 0 } ? new float[times.Count] : Array.Empty<float>();
+                await InitRpeChart(rawChart, showMessage, times);
+            }
             return rawChart;
         }
 

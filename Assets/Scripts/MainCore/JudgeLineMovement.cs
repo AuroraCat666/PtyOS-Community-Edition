@@ -142,6 +142,12 @@ namespace MainCore
 
             if (!IsImage)
             {
+                if (Line.anchor != new Vector2(0.5f, 0.5f) && sr.sprite != null && sr.sprite.texture != null)
+                {
+                    var tex = sr.sprite.texture;
+                    float ppu = sr.sprite.pixelsPerUnit > 0 ? sr.sprite.pixelsPerUnit : 100f;
+                    sr.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), Line.anchor, ppu);
+                }
                 TargetScale = new Vector2(
                     236f * 2.5f * Camera.main.orthographicSize * GlobalSetting.Aspect / sr.sprite.texture.width,
                     220 * 0.008f * Camera.main.orthographicSize / sr.sprite.texture.height);
@@ -487,6 +493,7 @@ namespace MainCore
                 var r = GlobalSetting.Lines[Line.father].RotateEventValue;
                 var matrix = Matrix4x4.TRS(t, Quaternion.Euler(0, 0, r), Vector3.one);
                 t = matrix.MultiplyPoint3x4(MoveEventValue);
+                MoveEventValue = t;
                 transform1.position = t;
                 UIMove = t;
             }

@@ -64,8 +64,8 @@ namespace MainCore
                     _runtimeScores.Add(player, 0);
                 }
 
-                SocketManager.OnUpdateScoreReceived += UpdateRuntimeScore;
-                SocketManager.OnUserQuitGame += RemoveUserFromRuntimeScore;
+                SocketManager.OnUpdateScoreReceived = UpdateRuntimeScore;
+                SocketManager.OnUserQuitGame = RemoveUserFromRuntimeScore;
 
                 UniTask.Void(async () =>
                 {
@@ -487,11 +487,12 @@ namespace MainCore
             if (!GlobalSetting.GameStarted || GlobalSetting.Paused) return;
             GlobalSetting.Paused = true;
             progressManager.StopTiming();
-            _audioSource.Pause();
-            _audioSource.volume = 0;
-            videoManager.Pause();
             float delta = Mathf.Min(3f, _audioSource.time);
-            _audioSource.time = Mathf.Max(_audioSource.time - 3f, 0f);
+            float targetTime = Mathf.Max(_audioSource.time - 3f, 0f);
+            _audioSource.Stop();
+            _audioSource.time = targetTime;
+            _audioSource.volume = 0;
+            try { videoManager.Pause(); } catch (System.Exception e) { UnityEngine.Debug.LogWarning("视频暂停异常（已忽略）: " + e.Message); }
             progressManager.TimeGoBack(delta, () => pauseWindow.TurnOn());
             if (GlobalSetting.IsMultiplayer) DisconnectListener();
         }
@@ -501,10 +502,10 @@ namespace MainCore
             if (GlobalSetting.GameStarted && GlobalSetting.Paused)
             {
                 pauseWindow.TurnOff();
-                // audio.time = Stopwatch.ElapsedMilliseconds * .001f;
                 progressManager.ContinueTiming();
-                _audioSource.UnPause();
-                videoManager.Resume();
+                _audioSource.volume = 0;
+                _audioSource.Play();
+                try { videoManager.Resume(); } catch (System.Exception e) { UnityEngine.Debug.LogWarning("视频恢复异常（已忽略）: " + e.Message); }
                 DOTween.To(() => _audioSource.volume, (x) => _audioSource.volume = x, 1f, 2f);
                 await Task.Delay(3000);
                 GlobalSetting.Paused = false;

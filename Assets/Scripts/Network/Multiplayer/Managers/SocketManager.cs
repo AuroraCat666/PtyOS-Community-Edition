@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
@@ -10,6 +11,7 @@ using MainCore;
 using MainCore.Common;
 using MainCore.UI.Utils;
 using MainCore.Utilities;
+using Network.Account.Utils;
 using Network.Multiplayer.Data;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -95,9 +97,14 @@ namespace Network.Multiplayer.Managers
             Application.quitting += LeaveServer;
             Application.wantsToQuit += () => true;
 #endif
-            SceneTransit.OnSceneClosing.AddListener(() =>
+            SceneTransit.OnSceneClosing.AddListener(() => ResetForSceneChange());
+        }
+
+        public static void ResetForSceneChange()
+        {
+            if (GlobalSetting.PlayerList != null)
             {
-                ResetState();
+                // 多人游戏进行中，不清空 socket/token，只清空 UI 回调
                 OnUpdateSongReceived = (_, _, _) => { };
                 OnSendPrepared = _ => { };
                 OnBackReceived = _ => { };
@@ -118,7 +125,30 @@ namespace Network.Multiplayer.Managers
                 OnGetRoomSongIdSucceeded = () => { };
                 OnUpdateScoreReceived = _ => { };
                 OnUserQuitGame = _ => { };
-            });
+                return;
+            }
+            
+            ResetState();
+            OnUpdateSongReceived = (_, _, _) => { };
+            OnSendPrepared = _ => { };
+            OnBackReceived = _ => { };
+            OnGetRoomInfoSucceeded = _ => { };
+            OnConnecting = () => { };
+            OnConnectSucceeded = () => { };
+            OnConnectFailed = () => { };
+            OnDisconnect = () => { };
+            OnLoginSucceeded = () => { };
+            OnCreateRoomSucceeded = () => { };
+            OnCloseRoomSucceeded = () => { };
+            OnJoinRoomSucceeded = () => { };
+            OnQuitRoomSucceeded = () => { };
+            OnUpdateSongSucceeded = () => { };
+            OnStartGameSucceeded = () => { };
+            OnGameStarted = _ => { };
+            OnSendMessageSucceeded = () => { };
+            OnGetRoomSongIdSucceeded = () => { };
+            OnUpdateScoreReceived = _ => { };
+            OnUserQuitGame = _ => { };
         }
 
         private static void ResetState()
@@ -596,6 +626,8 @@ namespace Network.Multiplayer.Managers
 
                 token = received.token;
                 serverId = received.serverId;
+                GlobalSetting.VerifyToken = received.token;
+                UpdateAccountToken(GlobalSetting.Username, received.token);
                 foreach (Action d in OnLoginSucceeded.GetInvocationList())
                 {
                     try { d.Invoke(); }
@@ -772,7 +804,17 @@ namespace Network.Multiplayer.Managers
             if (socket == null) return;
             stopReceive = true;
             taskReceive = null;
-            if (roomId != "") (isOwner ? OnCloseRoomSucceeded : OnQuitRoomSucceeded).Invoke();
+            if (roomId != "")
+            {
+                try
+                {
+                    (isOwner ? OnCloseRoomSucceeded : OnQuitRoomSucceeded).Invoke();
+                }
+                catch (Exception e)
+                {
+                    UnityEngine.Debug.LogWarning($"[Socket] 房间状态回调异常（已忽略）: {e.Message}");
+                }
+            }
             try
             {
                 socket.Disconnect(false);
@@ -791,6 +833,24 @@ namespace Network.Multiplayer.Managers
             songType = SongType.empty;
             songInfo = null;
             chartServer = "";
+        }
+
+        private static void UpdateAccountToken(string username, string newToken)
+        {
+            try
+            {
+                var accounts = AccountManager.GetAccountList();
+                var account = accounts.FirstOrDefault(a => a.Username == username);
+                if (account != null)
+                {
+                    account.VerifyToken = newToken;
+                    AccountManager.SaveAccountList(accounts, username);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Log($"更新账号 token 失败: {e.Message}");
+            }
         }
     }
 

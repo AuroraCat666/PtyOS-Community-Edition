@@ -38,6 +38,11 @@ namespace MainCore.Common
             IsOn = IsOn;
         }
 
+        private void OnEnable()
+        {
+            ChangeValue(isOn);
+        }
+
         [ContextMenu("Toggle")]
         private void Toggle()
         {

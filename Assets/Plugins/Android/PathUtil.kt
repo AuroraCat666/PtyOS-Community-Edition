@@ -1,4 +1,4 @@
-package com.totorowldox.REPhityOS;
+package xyz.Yuncishu.ptyOS;
 
 import android.os.Build
 import android.os.LocaleList

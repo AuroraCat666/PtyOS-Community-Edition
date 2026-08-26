@@ -294,11 +294,8 @@ namespace Network.Account
 #if !UNITY_EDITOR
             Debug.Log("Try login");
 #endif
-            var builder = new UriBuilder(RepAPI.GetAPIBase().UrlCombine(RepAPI.loginUrl))
-            {
-                Query = $"username={username}&password={password}"
-            };
-            string uri = builder.Uri.ToString();
+            string uri = $"{RepAPI.GetAPIBase().UrlCombine(RepAPI.loginUrl)}" +
+                         $"?username={Uri.EscapeDataString(username)}&password={Uri.EscapeDataString(password)}";
 #if UNITY_EDITOR
             Debug.Log("Try send for login: " + uri);
 #endif
@@ -347,11 +344,8 @@ namespace Network.Account
                 Debug.Log("RePhigros API: Undefined behaviour detected, trying to verify with illegal param.");
             }
 
-            var builder = new UriBuilder(RepAPI.GetAPIBase().UrlCombine(RepAPI.verifyUrl))
-            {
-                Query = $"username={accountInfo.Username}&verifytoken={accountInfo.VerifyToken}"
-            };
-            string uri = builder.Uri.ToString();
+            string uri = $"{RepAPI.GetAPIBase().UrlCombine(RepAPI.verifyUrl)}" +
+                         $"?username={Uri.EscapeDataString(accountInfo.Username)}&verifytoken={Uri.EscapeDataString(accountInfo.VerifyToken)}";
 #if UNITY_EDITOR
             Debug.Log("Try send for verify: " + uri);
 #endif
@@ -395,7 +389,7 @@ namespace Network.Account
                    token.Substring(token.Length - 7);
         }
 
-        private static readonly Regex Regex = new Regex("[^a-zA-Z0-9]");
+        private static readonly Regex Regex = new Regex("[^a-zA-Z0-9_-]");
         private string username, password;
 
         private void CheckUsername(string input)
@@ -412,14 +406,7 @@ namespace Network.Account
 
         private void CheckPassword(string input)
         {
-            if (Regex.IsMatch(input))
-            {
-                passwordInputField.text = password;
-            }
-            else
-            {
-                password = passwordInputField.text;
-            }
+            password = passwordInputField.text;
         }
     }
 }

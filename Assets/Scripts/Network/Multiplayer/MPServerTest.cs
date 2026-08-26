@@ -16,6 +16,7 @@ using Network.Multiplayer.Data;
 using Network.Multiplayer.Managers;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Debug = UnityEngine.Debug;
 
@@ -331,22 +332,34 @@ public class MPServerTest : MonoBehaviour
     {
         if (selectedSongType == SongType.empty) return;
         downloadMask.SetActive(true);
-        if (await DownloadSong())
+        try
         {
-            ChatManager.AddMessage("downloadSucceeded",
-                $"成功从{selectedSongType switch { SongType.rep => "官方谱面服务器", SongType.Phizone => "PhiZone谱面服务器", SongType.empty => throw new ArgumentOutOfRangeException(), _ => throw new ArgumentOutOfRangeException() }}下载谱面{selectedSongId}",
-                MessageType.Server);
-            SetDownloaded(true);
+            if (await DownloadSong())
+            {
+                ChatManager.AddMessage("downloadSucceeded",
+                    $"成功从{selectedSongType switch { SongType.rep => "官方谱面服务器", SongType.Phizone => "PhiZone谱面服务器", SongType.empty => throw new ArgumentOutOfRangeException(), _ => throw new ArgumentOutOfRangeException() }}下载谱面{selectedSongId}",
+                    MessageType.Server);
+                SetDownloaded(true);
+            }
+            else
+            {
+                ChatManager.AddMessage("downloadFailed",
+                    $"错误：无法从{selectedSongType switch { SongType.rep => "官方谱面服务器", SongType.Phizone => "PhiZone谱面服务器", SongType.empty => throw new ArgumentOutOfRangeException(), _ => throw new ArgumentOutOfRangeException() }}下载谱面{selectedSongId}，或谱面文件不规范",
+                    MessageType.Error);
+                SetDownloaded(false);
+            }
         }
-        else
+        catch (Exception e)
         {
+            Debug.LogException(e);
             ChatManager.AddMessage("downloadFailed",
-                $"错误：无法从{selectedSongType switch { SongType.rep => "官方谱面服务器", SongType.Phizone => "PhiZone谱面服务器", SongType.empty => throw new ArgumentOutOfRangeException(), _ => throw new ArgumentOutOfRangeException() }}下载谱面{selectedSongId}，或谱面文件不规范",
-                MessageType.Error);
+                $"错误：无法下载谱面{selectedSongId}：{e.Message}", MessageType.Error);
             SetDownloaded(false);
         }
-
-        downloadMask.SetActive(false);
+        finally
+        {
+            downloadMask.SetActive(false);
+        }
     }
 
     private void OnReadyButtonValueChanged(bool isOn)
@@ -367,7 +380,15 @@ public class MPServerTest : MonoBehaviour
         closeRoomPending = false;
         if (sendMask != null) sendMask.SetActive(false);
         SocketManager.Disconnect();
-        SceneTransit.Instance.LoadScene("NetworkTest", 0);
+        if (SceneTransit.Instance != null)
+        {
+            SceneTransit.Instance.JumpScene("NetworkTest", 0);
+        }
+        else
+        {
+            SocketManager.ResetForSceneChange();
+            SceneManager.LoadScene("NetworkTest");
+        }
     }
 
     private async void CloseRoom()
@@ -567,7 +588,14 @@ public class MPServerTest : MonoBehaviour
         GlobalSetting.Pitch = 1.0f;
         HitSoundManager.UpdateVolume();
         
-        SceneTransit.Instance.LoadScene("PlayingScene");
+        if (SceneTransit.Instance != null)
+        {
+            SceneTransit.Instance.LoadScene("PlayingScene");
+        }
+        else
+        {
+            SceneManager.LoadScene("PlayingScene");
+        }
     }
 
     // private int counter = 0;
@@ -583,7 +611,7 @@ public class MPServerTest : MonoBehaviour
             SetButtonState(roomState);
         }
 
-        bStartGame.interactable = downloaded && SocketManager.CanStartGame;
+        bStartGame.interactable = SocketManager.CanStartGame;
 
         string token = SocketManager.GetToken();
         string roomId = SocketManager.GetRoomId();
@@ -638,13 +666,20 @@ public class MPServerTest : MonoBehaviour
 
         downloaded = value;
         bDownloadSong.interactable = !value && selectedSongType != SongType.empty;
-        bReady.Interactable = value;
-        bStartGame.interactable = value && SocketManager.CanStartGame;
+        bReady.Interactable = true;
+        bStartGame.interactable = SocketManager.CanStartGame;
     }
 
     public void Back()
     {
-        SceneTransit.Instance.Back();
+        if (SceneTransit.Instance != null)
+        {
+            SceneTransit.Instance.Back();
+        }
+        else
+        {
+            SceneManager.LoadScene("MainScene");
+        }
     }
 
     /// <summary>

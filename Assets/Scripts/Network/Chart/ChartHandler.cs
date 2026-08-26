@@ -88,7 +88,9 @@ namespace Network.Chart
             if (string.IsNullOrEmpty(SocketManager.ChartUrlBase)) return null;
             CheckDirectory($"{TmpPathRoot}/online_charts");
             if (downloadedCharts.Contains(id)) return await ReadChartZip($"{TmpPathRoot}/online_charts/{id}");
-            byte[] bytes = await (SocketManager.ChartUrlBase.UrlCombine("/download") + $"?chartid={id}").SendGetRequestAsync();
+            byte[] bytes = await (SocketManager.ChartUrlBase.UrlCombine("/download") + $"?chartid={id}").SendGetRequestAsync(120000);
+            if (bytes == null || bytes.Length == 0)
+                throw new InvalidOperationException($"谱面 {id} 不存在或下载失败");
             await WriteChartZip($"{TmpPathRoot}/online_charts/{id}", bytes);
             downloadedCharts.Add(id);
             return bytes;

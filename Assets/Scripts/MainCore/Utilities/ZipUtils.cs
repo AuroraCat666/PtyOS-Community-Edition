@@ -56,7 +56,6 @@ namespace MainCore.Utilities
             using ZipInputStream zipfiles = new ZipInputStream(stream);
             while (zipfiles.GetNextEntry() is { } theEntry)
             {
-                theEntry.IsUnicodeText = true;
                 string directoryName = "";
                 string pathToZip = "";
                 pathToZip = theEntry.Name;

@@ -15,6 +15,7 @@ using Network.Multiplayer.Components;
 using Network.Multiplayer.Data;
 using Newtonsoft.Json;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace Network.Multiplayer.Managers
@@ -223,7 +224,10 @@ namespace Network.Multiplayer.Managers
                     GlobalSetting.ReadUserSettings();
                     HitSoundManager.UpdateVolume();
                     PopupMessageManager.Instance.Clear();
-                    SceneTransit.Instance.LoadScene("LoadInto", 2);
+                    if (SceneTransit.Instance != null)
+                        SceneTransit.Instance.LoadScene("LoadInto", 0);
+                    else
+                        SceneManager.LoadScene("LoadInto");
                     return;
                 }
             }

@@ -50,8 +50,17 @@ namespace MainCore.Common
                 FileBrowser.SetFilters(pickMode == FileBrowser.PickMode.Files);
             }
 
-            FileBrowser.ShowLoadDialog(paths => inputFieldStringSetting.SetValue(paths[0]),
+            FileBrowser.ShowLoadDialog(paths => inputFieldStringSetting.SetValue(ResolvePickedPath(paths[0])),
                 () => { }, pickMode, false, Application.persistentDataPath, "", "选择...", "确定");
+        }
+
+        private static string ResolvePickedPath(string path)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            return MainCore.Utilities.AndroidStorageUtil.SAFUriToRealPath(path);
+#else
+            return path;
+#endif
         }
 
         public void Lock()

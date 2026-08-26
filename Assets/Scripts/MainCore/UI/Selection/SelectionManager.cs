@@ -81,6 +81,24 @@ namespace MainCore.UI.Selection
             }
             
             var folders = GetFolders(Util.DataPath);
+            if (folders.Count == 0)
+            {
+                string hint;
+#if UNITY_ANDROID && !UNITY_EDITOR
+                using (var environment = new AndroidJavaClass("android.os.Environment"))
+                {
+                    bool hasPermission = environment.CallStatic<bool>("isExternalStorageManager");
+                    hint = hasPermission
+                        ? $"未在 {Util.DataPath} 找到任何谱面文件夹\n请确认谱面是「每首曲子一个子文件夹」的结构（内含 info.yml/info.txt）"
+                        : $"无法访问谱面目录 {Util.DataPath}\n请在系统设置中为 PtyOS 开启「所有文件访问」权限";
+                }
+#else
+                hint = $"未在 {Util.DataPath} 找到任何谱面文件夹\n请确认谱面是「每首曲子一个子文件夹」的结构（内含 info.yml/info.txt）";
+#endif
+                Debug.LogWarning(hint);
+                PopupMessageManager.Instance.Message(hint);
+            }
+
             var newDict = new Dictionary<string, BeatmapInfo>();
             var failedFolders = new List<string>();
             

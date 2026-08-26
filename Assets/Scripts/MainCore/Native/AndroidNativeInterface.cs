@@ -38,7 +38,7 @@ namespace MainCore.Native
 
 #if UNITY_ANDROID
         private static AndroidJavaClass _androidJavaClass;
-        private const string JavaClassName = "com.totorowldox.REPhityOS.AndroidInterface";
+        private const string JavaClassName = "xyz.Yuncishu.ptyOS.AndroidInterface";
 #endif
     }
 }

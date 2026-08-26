@@ -57,7 +57,8 @@ namespace MainCore.Data
         {
             Undefined = 0,
             Decimal = 1,
-            ExtraList = 2
+            ExtraList = 2,
+            Color = 3
         }
     }
 

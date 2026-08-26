@@ -12,7 +12,7 @@
         },
         {
             "$type": "Unity.Build.Common.ApplicationIdentifier, Unity.Build",
-            "PackageName": "com.totorowldox.REPhigros"
+            "PackageName": "xyz.Yuncishu.ptyOS"
         }
     ]
 }
