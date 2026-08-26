@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
@@ -41,7 +41,7 @@ public class MailService
     public string CreateCode(string key, TimeSpan? lifetime = null)
     {
         string code = Random.Shared.Next(100000, 1000000).ToString();
-        _codes[key] = new CodeEntry(code, DateTimeOffset.UtcNow + (lifetime ?? TimeSpan.FromSeconds(60)), 0);
+        _codes[key] = new CodeEntry(code, DateTimeOffset.UtcNow + (lifetime ?? TimeSpan.FromMinutes(5)), 0);
         return code;
     }
 
@@ -67,7 +67,7 @@ public class MailService
     {
         if (!Enabled) throw new InvalidOperationException("SMTP 未配置");
         string html = BuildHtml(kind, to, hint, code);
-        string plain = $"{hint}\n\n你的验证码是：{code}\n验证码 60 秒内有效，请勿泄露给他人。\n\n—— PtyOS 社区";
+        string plain = $"{hint}\n\n你的验证码是：{code}\n验证码 5 分钟内有效，请勿泄露给他人。\n\n—— PtyOS 社区";
         var builder = new BodyBuilder { HtmlBody = html, TextBody = plain };
         var message = new MimeMessage();
         message.From.Add(MailboxAddress.Parse(_settings.From));
@@ -104,7 +104,7 @@ public class MailService
           <div style=""background:#f2f4f6;border:1px solid #dfe3e7;border-radius:8px;padding:18px;text-align:center;"">
             <span style=""font-size:34px;font-weight:800;letter-spacing:10px;color:#00a6b6;font-family:Consolas,monospace;"">{code}</span>
           </div>
-          <p style=""margin:18px 0 0;font-size:13px;color:#697078;"">验证码 <strong style=""color:#17191d;"">60 秒内</strong>有效，请勿泄露给他人。</p>
+          <p style=""margin:18px 0 0;font-size:13px;color:#697078;"">验证码 <strong style=""color:#17191d;"">5 分钟内</strong>有效，请勿泄露给他人。</p>
           <p style=""margin:8px 0 0;font-size:12px;color:#a4aab0;"">{footer}</p>
         </td></tr>
         <tr><td style=""padding:0 30px 26px;font-size:12px;color:#a4aab0;"">此邮件由系统自动发送，请勿回复。</td></tr>
