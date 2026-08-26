@@ -18,7 +18,7 @@ namespace MainCore.Utilities
         /// <param name="OverWrite">是否覆盖已存在的文件</param>
         public static void UnZip(string ZipFile, string TargetDirectory, bool OverWrite = true)
         {
-            UnZip(File.OpenRead(ZipFile), TargetDirectory, OverWrite);
+            UnZip(File.ReadAllBytes(ZipFile), TargetDirectory, OverWrite);
         }
 
         /// <summary>
@@ -29,11 +29,6 @@ namespace MainCore.Utilities
         /// <param name="TargetDirectory">解压到的目录</param>
         /// <param name="OverWrite">是否覆盖已存在的文件</param>
         public static void UnZip(byte[] data, string TargetDirectory, bool OverWrite = true)
-        {
-            UnZip(new MemoryStream(data), TargetDirectory, OverWrite);
-        }
-
-        private static void UnZip(Stream stream, string TargetDirectory, bool OverWrite)
         {
             TargetDirectory = TargetDirectory.Replace("\\", "/");
             
@@ -53,6 +48,20 @@ namespace MainCore.Utilities
                 TargetDirectory = String.Concat(TargetDirectory, "/");
             }
 
+            try
+            {
+                UnZipWithSharpZip(new MemoryStream(data), TargetDirectory);
+            }
+            catch (ICSharpCode.SharpZipLib.Zip.ZipException)
+            {
+                // SharpZipLib 对部分高版本/特殊 zip 条目过严（如 version required 788），
+                // 回退到 .NET 内置 ZipFile 解压（对版本更宽容）
+                UnZipWithSystemZip(new MemoryStream(data), TargetDirectory);
+            }
+        }
+
+        private static void UnZipWithSharpZip(Stream stream, string TargetDirectory)
+        {
             using ZipInputStream zipfiles = new ZipInputStream(stream);
             while (zipfiles.GetNextEntry() is { } theEntry)
             {
@@ -68,8 +77,6 @@ namespace MainCore.Utilities
                 Directory.CreateDirectory(TargetDirectory + directoryName);
 
                 if (fileName == "") continue;
-                if ((!File.Exists(TargetDirectory + directoryName + fileName) || !OverWrite) &&
-                    (File.Exists(TargetDirectory + directoryName + fileName))) continue;
                 using FileStream streamWriter = File.Create(TargetDirectory + directoryName + fileName);
                 int size;
                 byte[] data = new byte[2048];
@@ -85,6 +92,21 @@ namespace MainCore.Utilities
             }
 
             zipfiles.Close();
+        }
+
+        private static void UnZipWithSystemZip(Stream stream, string TargetDirectory)
+        {
+            using var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
+            foreach (var entry in archive.Entries)
+            {
+                string fullPath = Path.Combine(TargetDirectory, entry.FullName);
+                string directory = Path.GetDirectoryName(fullPath) ?? TargetDirectory;
+                Directory.CreateDirectory(directory);
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+                using var entryStream = entry.Open();
+                using var output = File.Create(fullPath);
+                entryStream.CopyTo(output);
+            }
         }
 
         /// <summary>

@@ -346,29 +346,57 @@ namespace MainCore.Settings
 
         private async void AddSkinFromPackage(string path)
         {
-            await UniTask.SwitchToMainThread();
-            string tmpDirPath = Application.temporaryCachePath + "/tmpSkinPackage";
-            string dirPath = $"{tmpDirPath}/{Path.GetFileNameWithoutExtension(path)}";
-            if (Directory.Exists(dirPath)) Directory.Delete(dirPath, true);
+            string logFile = Path.Combine(new DirectoryInfo(Application.dataPath + "/..").FullName, "skin_import_log.txt");
+            System.Action<string> LogToFile = msg =>
+            {
+                try { System.IO.File.AppendAllText(logFile, DateTime.Now.ToString("HH:mm:ss") + " " + msg + "\n"); } catch { }
+            };
+            LogToFile("AddSkinFromPackage: " + path);
+            Debug.Log("[SkinManager] AddSkinFromPackage: " + path);
             try
             {
-                ZipUtils.UnZip(await File.ReadAllBytesAsync(path),
-                    tmpDirPath + $"/{Path.GetFileNameWithoutExtension(path)}");
-            }
-            catch (IOException)
-            {
-                InGameUIManager.ShowModalWindowWithClose("错误", "无法读取文件", () => { }, "确定");
-                return;
-            }
+                await UniTask.SwitchToMainThread();
+                string tmpDirPath = Application.temporaryCachePath + "/tmpSkinPackage";
+                string dirPath = $"{tmpDirPath}/{Path.GetFileNameWithoutExtension(path)}";
+                if (Directory.Exists(dirPath)) Directory.Delete(dirPath, true);
+                byte[] zipBytes = await File.ReadAllBytesAsync(path);
+                LogToFile("读取zip字节数: " + zipBytes.Length + " 前4字节: " + BitConverter.ToString(zipBytes, 0, 4));
+                try
+                {
+                    ZipUtils.UnZip(zipBytes,
+                        tmpDirPath + $"/{Path.GetFileNameWithoutExtension(path)}");
+                }
+                catch (IOException)
+                {
+                    LogToFile("IOException: 无法读取文件");
+                    InGameUIManager.ShowModalWindowWithClose("错误", "无法读取文件", () => { }, "确定");
+                    return;
+                }
+                catch (System.Exception e)
+                {
+                    LogToFile("解压异常: " + e.GetType().Name + " - " + e.Message);
+                    LogToFile("解压异常堆栈: " + e.StackTrace);
+                    Debug.LogError("[SkinManager] 解压皮肤包失败: " + e);
+                    InGameUIManager.ShowModalWindowWithClose("错误", "皮肤包解压失败: " + e.Message + "\n\n日志: " + logFile, () => { }, "确定");
+                    return;
+                }
 
-            SkinInfo readSkin = await GameUtils.ReadSkin(dirPath);
-            if (readSkin == null)
-            {
-                Directory.Delete(tmpDirPath + $"/{Path.GetFileNameWithoutExtension(path)}", true);
-                return;
+                LogToFile("解压成功，文件数: " + Directory.GetFiles(dirPath).Length);
+                SkinInfo readSkin = await GameUtils.ReadSkin(dirPath);
+                LogToFile("ReadSkin 结果: " + (readSkin != null ? readSkin.skinName : "null"));
+                if (readSkin == null)
+                {
+                    Directory.Delete(tmpDirPath + $"/{Path.GetFileNameWithoutExtension(path)}", true);
+                    return;
+                }
+                SkinManager.Instance.AddSkinInfo(dirPath, readSkin);
+                RefreshExternalSkins();
             }
-            SkinManager.Instance.AddSkinInfo(dirPath, readSkin);
-            RefreshExternalSkins();
+            catch (System.Exception e)
+            {
+                LogToFile("AddSkinFromPackage 异常: " + e);
+                Debug.LogError("[SkinManager] AddSkinFromPackage 异常: " + e);
+            }
         }
 
         public void PlayHitSound(int id)

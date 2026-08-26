@@ -73,6 +73,8 @@ namespace MainCore
             videoPlayer.audioOutputMode = VideoAudioOutputMode.None;
             videoPlayer.renderMode = VideoRenderMode.CameraFarPlane;
             videoPlayer.targetCamera = Camera.main;
+            // 保持视频纵横比并铺满整个屏幕（超出部分裁剪），任意分辨率都满屏
+            videoPlayer.aspectRatio = VideoAspectRatio.FitOutside;
             videoPlayer.prepareCompleted += OnPrepareCompleted;
 
             WaitForPlay();

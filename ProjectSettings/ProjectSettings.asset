@@ -173,7 +173,7 @@ PlayerSettings:
   androidMinAspectRatio: 1
   applicationIdentifier:
     Android: xyz.Yuncishu.ptyOS
-    Standalone: com.totorowldox.RE-Phigros
+    Standalone: xyz.Yuncishu.ptyOS
     iPhone: com.totorowldox.RE-Phigros
   buildNumber:
     Standalone: 0
