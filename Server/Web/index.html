@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>RPGR Community</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="PtyOS Community 首页">
+      <span class="brand-mark">R</span>
+      <span><strong>PtyOS</strong><small>COMMUNITY</small></span>
+    </a>
+    <nav class="tabs" aria-label="页面导航">
+      <button class="tab active" data-view="community">社区</button>
+      <button class="tab" data-view="announcements">动态</button>
+      <button class="tab admin-only hidden" data-view="admin">管理</button>
+    </nav>
+    <div class="account-area">
+      <button id="authButton" class="button primary">登录 / 注册</button>
+      <button id="profileButton" class="profile-button hidden" aria-label="打开个人资料">
+        <span class="avatar small" id="navAvatar">?</span><span id="navUsername"></span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section id="communityView" class="view active">
+      <div class="status-band">
+        <div>
+          <p class="eyebrow">公开社区节点</p>
+          <h1 id="serverName">PtyOS Community</h1>
+          <p id="serverMotd" class="motd">正在连接社区服务...</p>
+        </div>
+        <div class="live-state"><span></span>服务在线</div>
+      </div>
+
+      <div class="metrics" aria-label="服务器概况">
+        <div class="metric"><span>在线玩家</span><strong id="onlineCount">0</strong></div>
+        <div class="metric"><span>开放房间</span><strong id="roomCount">0</strong></div>
+        <div class="metric"><span>进行中</span><strong id="gameCount">0</strong></div>
+        <div class="metric"><span>社区成员</span><strong id="memberCount">-</strong></div>
+      </div>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div><p class="eyebrow">实时大厅</p><h2>社区房间</h2></div>
+          <button class="button subtle" id="refreshRooms">刷新</button>
+        </div>
+        <div id="roomsGrid" class="rooms-grid"></div>
+        <div id="roomsEmpty" class="empty-state hidden"><strong>暂无开放房间</strong><span>从游戏客户端创建房间后会显示在这里。</span></div>
+      </section>
+
+      <section class="community-note">
+        <div class="note-accent"></div>
+        <div><p class="eyebrow">社区账户</p><h2>一个身份，连接游戏与社区</h2></div>
+        <p>注册后可在游戏客户端使用同一用户名与密码登录，也可以上传自己的头像。</p>
+        <button class="button dark" id="joinButton">创建账户</button>
+      </section>
+    </section>
+
+    <section id="announcementsView" class="view">
+      <div class="status-band">
+        <div>
+          <p class="eyebrow">OFFICIAL NEWS</p>
+          <h1>社区动态</h1>
+          <p class="motd">维护、更新与其他官方公告都会在这里发布。</p>
+        </div>
+        <div class="live-state"><span></span>实时同步</div>
+      </div>
+      <div class="section-block">
+        <div class="section-heading">
+          <div><p class="eyebrow">公告栏</p><h2>全部公告</h2></div>
+          <button class="button subtle" id="refreshAnnouncements">刷新</button>
+        </div>
+        <div id="announcementsList" class="announcements-list"></div>
+        <div id="announcementsEmpty" class="empty-state hidden"><strong>暂无公告</strong><span>官方公告发布后会显示在这里。</span></div>
+      </div>
+    </section>
+
+    <section id="adminView" class="view">
+      <div class="admin-heading">
+        <div><p class="eyebrow">ADMIN CONSOLE</p><h1>社区管理</h1><p>用户权限、封禁状态与实时房间查询。</p></div>
+        <button class="button subtle" id="refreshAdmin">刷新数据</button>
+      </div>
+      <div class="admin-layout">
+        <section class="tool-panel">
+          <div class="section-heading compact"><div><p class="eyebrow">成员目录</p><h2>用户管理</h2></div><input id="userSearch" class="search" placeholder="搜索用户名"></div>
+          <div class="table-wrap"><table><thead><tr><th>用户</th><th>角色</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody id="userTable"></tbody></table></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading compact"><div><p class="eyebrow">服务器状态</p><h2>房间查询</h2></div></div>
+          <div id="adminRooms" class="admin-rooms"></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading compact"><div><p class="eyebrow">成员管理</p><h2>手动创建用户</h2></div></div>
+          <form id="createUserForm">
+            <label>用户名<input id="newUsername" required minlength="3" maxlength="24" placeholder="3-24 位字母数字"></label>
+            <label>密码<input id="newPassword" type="password" required minlength="8" maxlength="128" placeholder="至少 8 位"></label>
+            <label>邮箱（可选）<input id="newEmail" placeholder="仅支持 @qq.com"></label>
+            <button class="button primary wide" type="submit">创建用户</button>
+          </form>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading compact"><div><p class="eyebrow">动态管理</p><h2>发布公告</h2></div></div>
+          <form id="announcementForm">
+            <label>类型<select id="announcementType"><option value="maintenance">维护公告</option><option value="update">更新公告</option><option value="other">其他公告</option></select></label>
+            <label>标题<input id="announcementTitle" required maxlength="80" placeholder="公告标题"></label>
+            <label>内容<textarea id="announcementContent" required rows="5" placeholder="公告内容，发布后将自动群发邮件给所有已绑定邮箱的成员"></textarea></label>
+            <button class="button primary wide" type="submit">发布并群发邮件</button>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="authDialog">
+    <button class="dialog-close" data-close="authDialog" aria-label="关闭">×</button>
+    <p class="eyebrow">WELCOME TO RPGR</p>
+    <h2 id="authTitle">登录社区</h2>
+    <div class="segmented"><button class="active" data-auth-mode="login">登录</button><button data-auth-mode="register">注册</button></div>
+    <form id="authForm">
+      <label>用户名<input id="usernameInput" autocomplete="username" required minlength="3" maxlength="24"></label>
+      <label>密码<input id="passwordInput" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label>
+      <div id="emailField" class="hidden">
+        <label>QQ 邮箱
+          <div class="email-input-group">
+            <input id="emailInput" type="text" maxlength="320" placeholder="请输入 QQ 号">
+            <span class="email-suffix">@qq.com</span>
+          </div>
+        </label>
+        <label>邮箱验证码<div class="code-row"><input id="emailCodeInput" required maxlength="6" placeholder="6 位验证码"><button id="sendCodeButton" type="button" class="button subtle">发送验证码</button></div></label>
+      </div>
+      <p id="authHint" class="form-hint">使用社区账户登录。</p>
+      <button id="forgotLink" class="link-button" type="button">忘记密码？</button>
+      <button class="button primary wide" type="submit">继续</button>
+    </form>
+  </dialog>
+
+  <dialog id="resetDialog">
+    <button class="dialog-close" data-close="resetDialog" aria-label="关闭">×</button>
+    <p class="eyebrow">ACCOUNT RECOVERY</p>
+    <h2>找回密码</h2>
+    <form id="resetForm">
+      <label>QQ 邮箱
+        <div class="email-input-group">
+          <input id="resetEmailInput" type="text" required maxlength="320" placeholder="请输入 QQ 号">
+          <span class="email-suffix">@qq.com</span>
+        </div>
+      </label>
+      <label>邮箱验证码<div class="code-row"><input id="resetCodeInput" required maxlength="6" placeholder="6 位验证码"><button id="sendResetCodeButton" type="button" class="button subtle">发送验证码</button></div></label>
+      <label>新密码<input id="resetPasswordInput" type="password" required minlength="8" maxlength="128"></label>
+      <button class="button primary wide" type="submit">重置密码</button>
+    </form>
+  </dialog>
+
+  <dialog id="profileDialog">
+    <button class="dialog-close" data-close="profileDialog" aria-label="关闭">×</button>
+    <p class="eyebrow">PLAYER PROFILE</p>
+    <div class="profile-summary"><span class="avatar large" id="profileAvatar">?</span><div><h2 id="profileUsername"></h2><p id="profileRole"></p></div></div>
+    <label class="upload-zone" for="avatarInput"><strong>上传新头像</strong><span>PNG、JPEG 或 WebP，最大 2 MB</span><input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp"></label>
+    <button id="logoutButton" class="button danger wide">退出登录</button>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

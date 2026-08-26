@@ -1,0 +1,18 @@
+# BEGIN PTYOS
+http://ptyos.yuncishu.xyz {
+    redir https://ptyos.yuncishu.xyz{uri} permanent
+}
+
+https://ptyos.yuncishu.xyz {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:18080
+
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        X-Frame-Options DENY
+        -Server
+    }
+
+}
+# END PTYOS

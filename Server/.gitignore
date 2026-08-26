@@ -1,0 +1,9 @@
+# 服务器数据（账号、密码哈希、谱面等敏感数据，绝不提交）
+/data/
+bin/
+obj/
+logs/
+*.log
+
+# Web 运行时数据
+Web/uploads/

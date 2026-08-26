@@ -1,0 +1,11 @@
+services:
+  rpgr-server:
+    build:
+      context: .
+    container_name: rpgr-server
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "26377:26377"
