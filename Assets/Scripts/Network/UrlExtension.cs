@@ -86,6 +86,7 @@ namespace Network
         {
             Debug.Log("URL: " + url);
             using HttpClient httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(60);
             HttpResponseMessage response = await httpClient.PostAsync(url, content ?? new MultipartContent());
             return await response.Content.ReadAsStringAsync();
         }

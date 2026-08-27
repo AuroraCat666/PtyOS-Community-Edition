@@ -25,6 +25,19 @@ public class CharacterAdjustManager : MonoBehaviour
     [SerializeField] private InputField_FloatValidation ifPpu, ifPivotX, ifPivotY;
     private byte[] characterTextureData;
     private Texture2D characterTexture;
+    private AudioClip uiClickSound;
+
+    private void PlayUiSound()
+    {
+        if (uiClickSound == null)
+        {
+            uiClickSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+        }
+        if (uiClickSound != null)
+        {
+            AudioSource.PlayClipAtPoint(uiClickSound, Camera.main != null ? Camera.main.transform.position : Vector3.zero, 1f);
+        }
+    }
 
     private void Awake()
     {
@@ -33,8 +46,16 @@ public class CharacterAdjustManager : MonoBehaviour
             ((RectTransform)panelSwitch.transform.parent.transform).sizeDelta =
                 b ? new Vector2(800f, 500f) : new Vector2(100f, 100f);
         };
-        selectCharacter.onClick.AddListener(SelectImage);
-        exportCharacter.onClick.AddListener(ExportCharacterPackage);
+        selectCharacter.onClick.AddListener(() =>
+        {
+            PlayUiSound();
+            SelectImage();
+        });
+        exportCharacter.onClick.AddListener(() =>
+        {
+            PlayUiSound();
+            ExportCharacterPackage();
+        });
         ifPpu.onEndEdit += _ => OnValueChanged();
         ifPivotX.onEndEdit += _ => OnValueChanged();
         ifPivotY.onEndEdit += _ => OnValueChanged();

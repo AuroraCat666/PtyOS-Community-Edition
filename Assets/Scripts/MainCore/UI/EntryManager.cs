@@ -30,6 +30,8 @@ namespace MainCore.UI
         private bool _splashPlayed = false;
         private bool _loaded = false;
         private CancellationTokenSource _cts = new CancellationTokenSource();
+        private AudioSource bgmSource;
+        private AudioClip bgmClip;
 
         private void Awake()
         {
@@ -106,11 +108,35 @@ namespace MainCore.UI
 
         private void Start()
         {
+            PlayBgm();
 #if !UNITY_EDITOR
             PlaySplash();
 #else
             _splashPlayed = true;
 #endif
+        }
+
+        private void PlayBgm()
+        {
+            if (bgmClip == null)
+            {
+                bgmClip = Resources.Load<AudioClip>("Audio/Aphasia");
+            }
+            if (bgmClip == null) return;
+            if (bgmSource == null) bgmSource = gameObject.AddComponent<AudioSource>();
+            bgmSource.clip = bgmClip;
+            bgmSource.loop = true;
+            bgmSource.playOnAwake = false;
+            bgmSource.volume = 0f;
+            bgmSource.Play();
+            bgmSource.DOFade(1f, 1.2f).SetEase(Ease.InQuad);
+        }
+
+        private void FadeOutBgm()
+        {
+            if (bgmSource == null || !bgmSource.isPlaying) return;
+            bgmSource.DOKill();
+            bgmSource.DOFade(0f, 0.8f).SetEase(Ease.OutQuad).OnComplete(() => bgmSource.Stop());
         }
 
         private void PlaySplash()
@@ -135,8 +161,23 @@ namespace MainCore.UI
             if (!_splashPlayed || _loaded) return;
             if (Input.GetMouseButtonUp(0))
             {
+                PlayClickSound();
                 _loaded = true;
                 LoadIn();
+            }
+        }
+
+        private AudioClip clickSound;
+
+        private void PlayClickSound()
+        {
+            if (clickSound == null)
+            {
+                clickSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+            }
+            if (clickSound != null)
+            {
+                AudioSource.PlayClipAtPoint(clickSound, Vector3.zero, 1f);
             }
         }
 
@@ -161,10 +202,15 @@ namespace MainCore.UI
                 PlayerPrefs.Save();
                 InGameUIManager.ShowModalWindowWithClose("公告",
                     "欢迎来到 PtyOS 社区版本！\n\n本版本为社区爱好者搭建！不得以任何形式转卖！\n如果你发现你是从付费渠道获得的模拟器请你立即退款并举报！\n\n本版本作者：云辞树 QQ3053860096\n请尊重原作者Kagari 939，谢谢",
-                    () => SceneTransit.Instance.JumpScene("MainScene", 0), "确定");
+                    () =>
+                    {
+                        FadeOutBgm();
+                        SceneTransit.Instance.JumpScene("MainScene", 0);
+                    }, "确定");
             }
             else
             {
+                FadeOutBgm();
                 SceneTransit.Instance.JumpScene("MainScene", 0);
             }
         }

@@ -50,11 +50,13 @@ namespace MainCore.UI
             {
                 source.Stop();
                 DelaySlider.SetValue(Convert.ToInt32(Delay * 1000));
+                if (MainCore.UI.MainManager.Instance != null) MainCore.UI.MainManager.Instance.SetBgmVolume(0.5f);
                 SceneTransit.Instance.LeaveAdditiveScene(SceneName);
             });
             noSaveExit.OnClick.AddListener(delegate
             {
                 source.Stop();
+                if (MainCore.UI.MainManager.Instance != null) MainCore.UI.MainManager.Instance.SetBgmVolume(0.5f);
                 SceneTransit.Instance.LeaveAdditiveScene(SceneName);
             });
             touch.OnDown.AddListener(delegate

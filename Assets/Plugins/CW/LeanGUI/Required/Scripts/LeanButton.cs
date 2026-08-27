@@ -192,6 +192,8 @@ namespace Lean.Gui
 
                 downPointers.Add(eventData.pointerId);
 
+                PlayClickSound();
+
                 if (multiDown == true || downPointers.Count == 1)
                 {
                     if (downTransitions != null)
@@ -259,6 +261,20 @@ namespace Lean.Gui
             if (onClick != null)
             {
                 onClick.Invoke();
+            }
+        }
+
+        private static AudioClip cachedClickSound;
+
+        private void PlayClickSound()
+        {
+            if (cachedClickSound == null)
+            {
+                cachedClickSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+            }
+            if (cachedClickSound != null)
+            {
+                AudioSource.PlayClipAtPoint(cachedClickSound, Camera.main != null ? Camera.main.transform.position : Vector3.zero, 1f);
             }
         }
 

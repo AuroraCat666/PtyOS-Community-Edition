@@ -45,9 +45,18 @@ namespace MainCore.Settings
 
         private void Start()
         {
+            // 所有开关（LeanToggle）切换时播放界面音效
+            foreach (var toggle in toggles)
+            {
+                if (toggle == null) continue;
+                toggle.OnOn.AddListener(PlayUiSound);
+                toggle.OnOff.AddListener(PlayUiSound);
+            }
+
             // 按钮注册
             displaySkinInfo.onClick.AddListener(() =>
             {
+                PlayUiSound();
                 InGameUIManager.ShowModalWindowWithClose("信息",
                     $"名称：{GlobalSetting.CurrentSkinInfo.skinName}\n" +
                     $"作者：{GlobalSetting.CurrentSkinInfo.author}\n" +
@@ -55,6 +64,7 @@ namespace MainCore.Settings
             });
             deleteSkin.onClick.AddListener(() =>
             {
+                PlayUiSound();
                 if (GlobalSetting.CurrentSkinInfo.isExternal)
                 {
                     InGameUIManager.ShowModalWindowWithClose("提示", "确定要删除吗？", () =>
@@ -103,7 +113,11 @@ namespace MainCore.Settings
                     aboutCanvas.SetActive(true);
                 });
             }
-            saveNExit.onClick.AddListener(SaveNExit);
+            saveNExit.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                SaveNExit();
+            });
             dspEnter.OnClick.AddListener(IntoDSP);
             delayCorrectionEnter.OnClick.AddListener(IntoDelayCorrection);
             if (GlobalSetting.IsOffline)
@@ -260,6 +274,7 @@ namespace MainCore.Settings
             PlayerPrefs.Save();
             if (qwq != null) PlayerPrefs.SetString(dataPath.BaseData.DataTag, qwq);
             DelayCorrection.DelaySlider = delaySlider;
+            if (MainCore.UI.MainManager.Instance != null) MainCore.UI.MainManager.Instance.SetBgmVolume(0f);
             SceneTransit.Instance.LoadAdditiveScene("DelayCorrectionScene");
         }
 
@@ -293,7 +308,8 @@ namespace MainCore.Settings
             }
 
             Application.targetFrameRate = PlayerPrefs.GetInt("refresh_rate", 60);
-            
+
+            if (MainCore.UI.MainManager.Instance != null) MainCore.UI.MainManager.Instance.SetBgmVolume(1f);
             SceneTransit.Instance.LeaveAdditiveScene(SceneName);
         }
 
@@ -402,6 +418,20 @@ namespace MainCore.Settings
         public void PlayHitSound(int id)
         {
             HitSoundManager.Instance.Play(id, 0.5f);
+        }
+
+        private AudioClip uiClickSound;
+
+        private void PlayUiSound()
+        {
+            if (uiClickSound == null)
+            {
+                uiClickSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+            }
+            if (uiClickSound != null)
+            {
+                AudioSource.PlayClipAtPoint(uiClickSound, Camera.main != null ? Camera.main.transform.position : Vector3.zero, 1f);
+            }
         }
 
         public void PlayHitEffect(int type)

@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using DG.Tweening;
 using MainCore.Common;
 using MainCore.Data;
 using MainCore.UI.Utils;
@@ -28,12 +29,20 @@ namespace MainCore.UI
         [SerializeField] private Sprite defaultCharacter;
 
         private static CharacterImage characterImage;
+        public static MainManager Instance { get; private set; }
 
         private void Awake()
         {
-            settings.onClick.AddListener(() => SceneTransit.Instance.LoadAdditiveScene("SettingsScene"));
+            Instance = this;
+            settings.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                SetBgmVolume(0.5f);
+                SceneTransit.Instance.LoadAdditiveScene("SettingsScene");
+            });
             singlePlay.onClick.AddListener(() =>
             {
+                PlayUiSound();
                 if (GlobalSetting.IsOffline)
                 {
                     InGameUIManager.ShowModalWindowWithClose("提示", "此功能需登录后才可使用", () => { }, "确定");
@@ -41,7 +50,11 @@ namespace MainCore.UI
                 }
                 SceneTransit.Instance.LoadScene("BeatmapSelectScene", 0);
             });
-            multiPlay.onClick.AddListener(() => SceneTransit.Instance.LoadScene("NetworkTest"));
+            multiPlay.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                SceneTransit.Instance.LoadScene("NetworkTest");
+            });
             login.onClick.AddListener(() => SceneTransit.Instance.LoadScene("LoginScene"));
             openCharaPreview.onClick.AddListener(() =>
             {
@@ -49,23 +62,40 @@ namespace MainCore.UI
                 datuCharacter.sprite = character.sprite;
             });
             closeCharaPreview.onClick.AddListener(() => datuPreviewFadeInOut.FadeOut(0.15f, 0.05f));
-            openCharacterSelections.onClick.AddListener(OpenCharacterOptions);
+            openCharacterSelections.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                OpenCharacterOptions();
+            });
 #if false
             openCharacterSelections.onClick.AddListener(OpenCharacterSelector);
 #endif
             deleteCharacter.onClick.AddListener(() =>
             {
+                PlayUiSound();
                 characterImage = null;
                 character.sprite = defaultCharacter;
                 PlayerPrefs.DeleteKey("character");
                 PlayerPrefs.Save();
             });
             deleteCharacter.onClick.AddListener(CloseCharacterOptions);
-            selectCharacter.onClick.AddListener(ImportCharacterPackage);
+            selectCharacter.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                ImportCharacterPackage();
+            });
             selectCharacter.onClick.AddListener(CloseCharacterOptions);
-            closeCharacterSelections.onClick.AddListener(CloseCharacterOptions);
+            closeCharacterSelections.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                CloseCharacterOptions();
+            });
 #if UNITY_EDITOR
-            editCharacter.onClick.AddListener(() => SceneTransit.Instance.LoadScene("CharacterAdjustScene"));
+            editCharacter.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                SceneTransit.Instance.LoadScene("CharacterAdjustScene");
+            });
             editCharacter.interactable = true;
             editCharacter.transform.Find("Mask").Find("Icon").gameObject.GetComponent<Image>().SetAlpha(1f);
 #else
@@ -77,6 +107,21 @@ namespace MainCore.UI
         }
 
         private AudioSource fuck;
+        private AudioClip uiClickSound;
+        private AudioSource bgmSource;
+        private AudioClip bgmClip;
+
+        private void PlayUiSound()
+        {
+            if (uiClickSound == null)
+            {
+                uiClickSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+            }
+            if (uiClickSound != null)
+            {
+                AudioSource.PlayClipAtPoint(uiClickSound, Camera.main != null ? Camera.main.transform.position : Vector3.zero, 1f);
+            }
+        }
 
         public void Start()
         {
@@ -143,6 +188,48 @@ namespace MainCore.UI
             CloseCharacterOptions();
             datuPreviewFadeInOut.FadeOut(0f);
             Update();
+
+            PlayBgm();
+        }
+
+        private void OnEnable()
+        {
+            SceneTransit.OnSceneClosing.AddListener(FadeOutBgm);
+        }
+
+        private void OnDisable()
+        {
+            SceneTransit.OnSceneClosing.RemoveListener(FadeOutBgm);
+        }
+
+        private void PlayBgm()
+        {
+            if (bgmClip == null)
+            {
+                bgmClip = Resources.Load<AudioClip>("Audio/PhigrOS Ending（Phigros 四周年版）");
+            }
+            if (bgmClip == null) return;
+            if (bgmSource == null) bgmSource = gameObject.AddComponent<AudioSource>();
+            bgmSource.clip = bgmClip;
+            bgmSource.loop = true;
+            bgmSource.playOnAwake = false;
+            bgmSource.volume = 0f;
+            bgmSource.Play();
+            bgmSource.DOFade(1f, 1.2f).SetEase(Ease.InQuad);
+        }
+
+        private void FadeOutBgm()
+        {
+            if (bgmSource == null || !bgmSource.isPlaying) return;
+            bgmSource.DOKill();
+            bgmSource.DOFade(0f, 0.8f).SetEase(Ease.OutQuad).OnComplete(() => bgmSource.Stop());
+        }
+
+        public void SetBgmVolume(float v)
+        {
+            if (bgmSource == null) return;
+            bgmSource.DOKill();
+            bgmSource.DOFade(v, 0.3f);
         }
 
         private void Update()

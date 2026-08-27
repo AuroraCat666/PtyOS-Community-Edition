@@ -32,16 +32,26 @@ namespace MainCore.UI.Selection
             GlobalSetting.Reset();
             back.onClick.AddListener(() =>
             {
+                PlayUiSound();
                 backgroundImage.texture = fallbackBackgroundImage.texture;
                 SelectionPreview.Reset();
                 SceneTransit.Instance.Back(useOldTransition: false);
             });
-            start.onClick.AddListener(StartPlay);
+            start.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                StartPlay();
+            });
             setting.onClick.AddListener(() =>
             {
+                PlayUiSound();
                 SceneTransit.Instance.LoadAdditiveScene("SettingsScene");
             });
-            import.onClick.AddListener(TryUnzipPez);
+            import.onClick.AddListener(() =>
+            {
+                PlayUiSound();
+                TryUnzipPez();
+            });
             refreshScroll.PullDistanceRequiredRefresh = 150f;
             refreshScroll.OnRefresh.AddListener(RefreshGameFolder);
             ReadCatalog();
@@ -188,6 +198,20 @@ namespace MainCore.UI.Selection
             list.Sort();
 
             return list;
+        }
+
+        private static AudioClip cachedUiSound;
+
+        private void PlayUiSound()
+        {
+            if (cachedUiSound == null)
+            {
+                cachedUiSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+            }
+            if (cachedUiSound != null)
+            {
+                AudioSource.PlayClipAtPoint(cachedUiSound, Vector3.zero, 1f);
+            }
         }
     }
 }

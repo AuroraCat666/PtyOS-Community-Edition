@@ -63,6 +63,20 @@ public class MPServerTest : MonoBehaviour
 
     private static string[] generalErrorMessages = { "未连接服务器", "无法发送数据包", "你小子没登录" };
 
+    private static AudioClip cachedUiSound;
+
+    private void PlayUiSound()
+    {
+        if (cachedUiSound == null)
+        {
+            cachedUiSound = Resources.Load<AudioClip>("Audio/dragon-studio-button-press-382713");
+        }
+        if (cachedUiSound != null)
+        {
+            AudioSource.PlayClipAtPoint(cachedUiSound, Vector3.zero, 1f);
+        }
+    }
+
     private void Awake()
     {
         // ZipConstants.DefaultCodePage = 65001; // UTF-8
@@ -77,6 +91,10 @@ public class MPServerTest : MonoBehaviour
             { bUpdateSong.gameObject, RoomState.RoomOwner },
             { bReady.gameObject, RoomState.RoomMember }
         };
+        foreach (var button in FindObjectsOfType<Button>(true))
+        {
+            button.onClick.AddListener(PlayUiSound);
+        }
         SocketManager.OnCloseRoomSucceeded += ChartHandler.OnRoomClosed;
         SocketManager.OnQuitRoomSucceeded += ChartHandler.OnRoomQuited;
         // SocketManager.OnCloseRoomSucceeded += chatManager.OnInitOrRoomClosed;
@@ -138,10 +156,12 @@ public class MPServerTest : MonoBehaviour
         {
             async Task OnGetFileSuccess(string path)
             {
+                Debug.Log("[上传] Step 1: ProcessChart start");
                 ownerChartPrepared = false;
                 SetDownloaded(false);
                 ownerLocalPath = path;
                 ownerChartPrepared = await ProcessChart(path);
+                Debug.Log($"[上传] Step 2: ProcessChart done, ownerChartPrepared={ownerChartPrepared}");
                 await UniTask.SwitchToMainThread();
                 if (!ownerChartPrepared)
                 {
@@ -151,8 +171,13 @@ public class MPServerTest : MonoBehaviour
                 }
 
                 localChartDirectory = path;
-                int state = SocketManager.UpdateSong(await ChartHandler.Upload(path), SongType.rep,
-                    (await GameUtils.GetSongInfo(path)).Item1);
+                Debug.Log("[上传] Step 3: GetSongInfo start");
+                var songInfo = await GameUtils.GetSongInfo(path);
+                Debug.Log("[上传] Step 4: Upload start");
+                string scoreId = await ChartHandler.Upload(path);
+                Debug.Log($"[上传] Step 5: UpdateSong start, scoreId={scoreId}");
+                int state = SocketManager.UpdateSong(scoreId, SongType.rep, songInfo.Item1);
+                Debug.Log($"[上传] Step 6: done, state={state}");
                 await UniTask.SwitchToMainThread();
                 if (state == 0)
                 {
@@ -170,8 +195,23 @@ public class MPServerTest : MonoBehaviour
             uploadMask.SetActive(true);
             OpenFile.LoadFolder(async path =>
             {
-                await OnGetFileSuccess(path);
-                uploadMask.SetActive(false);
+                try
+                {
+                    await OnGetFileSuccess(path);
+                }
+                catch (Exception e)
+                {
+                    ownerChartPrepared = false;
+                    SetDownloaded(false);
+                    string stackTrace = e.StackTrace ?? "";
+                    if (stackTrace.Length > 200) stackTrace = stackTrace.Substring(0, 200) + "...";
+                    Debug.LogError($"[上传谱面] {e}\n{e.StackTrace}");
+                    ChatManager.AddMessage("Server", $"上传谱面失败：{e.Message}\n堆栈：{stackTrace}", MessageType.Error);
+                }
+                finally
+                {
+                    uploadMask.SetActive(false);
+                }
             }, () => { uploadMask.SetActive(false); }, Util.DataPath, "选择谱面...", "上传");
         });
         bDownloadSong.onClick.AddListener(Download);

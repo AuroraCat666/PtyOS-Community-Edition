@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
@@ -86,7 +85,7 @@ namespace Network
             if (res is not { status: "OK" })
             {
                 InGameUIManager.ShowModalWindowWithClose("致命错误", "Re:Phigros服务器内部故障，请联系开发组", Util.QuitApp, "退出程序");
-                throw new HttpRequestException($"RePhigros API Service Error, Error code: {res.status}");
+                throw new Exception($"RePhigros API Service Error, Error code: {res.status}");
             }
 
             Debug.Log($"已连接{(useMirror ? "镜像站" : "主站")}");
@@ -107,7 +106,7 @@ namespace Network
             manifest = JsonConvert.DeserializeObject<Manifest>(result);
             if (manifest == null)
             {
-                throw new HttpRequestException($"RePhigros API: Service Error while getting manifest");
+                throw new Exception($"RePhigros API: Service Error while getting manifest");
             }
 
             Debug.Log("RePhigros API: Manifest got.\n" + JsonConvert.SerializeObject(manifest, Formatting.Indented));

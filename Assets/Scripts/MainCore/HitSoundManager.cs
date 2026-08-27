@@ -31,6 +31,7 @@ namespace MainCore
 
         protected override void OnAwake()
         {
+            DontDestroyOnLoad(gameObject);
             InitMaAudio().Forget();
         }
 

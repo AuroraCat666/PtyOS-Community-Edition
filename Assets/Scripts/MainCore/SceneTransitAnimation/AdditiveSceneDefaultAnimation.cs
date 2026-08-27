@@ -31,7 +31,7 @@ namespace MainCore.SceneTransitAnimation
             _blurMat = Instantiate(new Material(Shader.Find("Custom/BackBlur")));
             blurImg.material = _blurMat;
             _blurMat.SetFloat(Radius, 0);
-            _blurMat.DOFloat(1f, Radius, .3f);
+            _blurMat.DOFloat(5f, Radius, .3f);
             return 300;
         }
 
