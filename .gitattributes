@@ -1,2 +1,35 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Unity 资源与配置统一使用 LF。
+# 仓库根原本是 * text=auto，配合 core.autocrlf=true，在 Windows 上会把 LF 转成 CRLF。
+# .meta / .unity / .prefab / .asset 被改坏后，Unity 可能解析失败或丢失引用。
+* text=auto eol=lf
+
+# 二进制资源不做任何换行转换
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.psd    binary
+*.tga    binary
+*.tif    binary
+*.tiff   binary
+*.exr    binary
+*.hdr    binary
+*.fbx    binary
+*.blend  binary
+*.unitypackage binary
+*.ttf    binary
+*.otf    binary
+*.dll    binary
+*.so     binary
+*.aar    binary
+*.jar    binary
+*.mp3    binary
+*.wav    binary
+*.ogg    binary
+*.flac   binary
+*.mp4    binary
+*.webm   binary
+*.avi    binary
+*.mov    binary
+*.zip    binary
+*.7z     binary
