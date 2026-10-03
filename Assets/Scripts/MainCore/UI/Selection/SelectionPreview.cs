@@ -53,9 +53,16 @@ namespace MainCore.UI.Selection
             illustrator.text = info.Illustrator;
             level.text = info.SongLevel;
             path.text = info.BasePath;
+
+            // 试听该谱面的前 15 秒（循环 + 淡入淡出）
+            SongPreviewManager.Instance.Play(info.BasePath, info.MusicPath);
         }
 
-        public static void Reset() => SelectedInfo = null;
+        public static void Reset()
+        {
+            SelectedInfo = null;
+            SongPreviewManager.Instance.Stop();
+        }
 
         private async void PreviewIllustration()
         {

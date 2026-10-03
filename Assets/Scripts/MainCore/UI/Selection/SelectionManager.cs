@@ -52,6 +52,8 @@ namespace MainCore.UI.Selection
                 PlayUiSound();
                 TryUnzipPez();
             });
+            // 离开列表场景时停掉曲目试听
+            SceneTransit.OnSceneClosing.AddListener(() => SongPreviewManager.Instance.Stop());
             refreshScroll.PullDistanceRequiredRefresh = 150f;
             refreshScroll.OnRefresh.AddListener(RefreshGameFolder);
             ReadCatalog();
