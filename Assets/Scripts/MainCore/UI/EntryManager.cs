@@ -30,8 +30,6 @@ namespace MainCore.UI
         private bool _splashPlayed = false;
         private bool _loaded = false;
         private CancellationTokenSource _cts = new CancellationTokenSource();
-        private AudioSource bgmSource;
-        private AudioClip bgmClip;
 
         private void Awake()
         {
@@ -118,25 +116,15 @@ namespace MainCore.UI
 
         private void PlayBgm()
         {
-            if (bgmClip == null)
-            {
-                bgmClip = Resources.Load<AudioClip>("Audio/Aphasia");
-            }
-            if (bgmClip == null) return;
-            if (bgmSource == null) bgmSource = gameObject.AddComponent<AudioSource>();
-            bgmSource.clip = bgmClip;
-            bgmSource.loop = true;
-            bgmSource.playOnAwake = false;
-            bgmSource.volume = 0f;
-            bgmSource.Play();
-            bgmSource.DOFade(1f, 1.2f).SetEase(Ease.InQuad);
+            // 交给全局 BgmManager 起播。它挂在 DontDestroyOnLoad 对象上，
+            // 进入 MainScene 后音乐继续循环，不会重新从头播。
+            BgmManager.Instance.Play();
         }
 
         private void FadeOutBgm()
         {
-            if (bgmSource == null || !bgmSource.isPlaying) return;
-            bgmSource.DOKill();
-            bgmSource.DOFade(0f, 0.8f).SetEase(Ease.OutQuad).OnComplete(() => bgmSource.Stop());
+            // 不再在这里停音乐 —— 切到 MainScene 应当继续播放。
+            // 音量改由 MainManager 调低。
         }
 
         private void PlaySplash()

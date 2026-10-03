@@ -309,7 +309,9 @@ namespace MainCore.Settings
 
             Application.targetFrameRate = PlayerPrefs.GetInt("refresh_rate", 60);
 
-            if (MainCore.UI.MainManager.Instance != null) MainCore.UI.MainManager.Instance.SetBgmVolume(1f);
+            // 恢复到当前场景的音量档（EntryScene 1.0 / MainScene 0.45），
+            // 不能直接给 1.0 —— 否则关掉设置后主界面音乐会突然变响。
+            BgmManager.Instance.RestoreSceneVolume();
             SceneTransit.Instance.LeaveAdditiveScene(SceneName);
         }
 

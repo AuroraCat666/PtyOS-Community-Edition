@@ -108,8 +108,6 @@ namespace MainCore.UI
 
         private AudioSource fuck;
         private AudioClip uiClickSound;
-        private AudioSource bgmSource;
-        private AudioClip bgmClip;
 
         private void PlayUiSound()
         {
@@ -204,32 +202,21 @@ namespace MainCore.UI
 
         private void PlayBgm()
         {
-            if (bgmClip == null)
-            {
-                bgmClip = Resources.Load<AudioClip>("Audio/PhigrOS Ending（Phigros 四周年版）");
-            }
-            if (bgmClip == null) return;
-            if (bgmSource == null) bgmSource = gameObject.AddComponent<AudioSource>();
-            bgmSource.clip = bgmClip;
-            bgmSource.loop = true;
-            bgmSource.playOnAwake = false;
-            bgmSource.volume = 0f;
-            bgmSource.Play();
-            bgmSource.DOFade(1f, 1.2f).SetEase(Ease.InQuad);
+            // 音乐从 EntryScene 起播后一直在循环，这里不重新 Play()，
+            // 只把音量压低，避免主页面的音乐盖住 UI 音效。
+            // BgmManager 挂在 DontDestroyOnLoad 对象上，跨场景不会断。
+            BgmManager.Instance.SetSceneVolume(BgmManager.MainSceneVolume, 0.8f);
         }
 
         private void FadeOutBgm()
         {
-            if (bgmSource == null || !bgmSource.isPlaying) return;
-            bgmSource.DOKill();
-            bgmSource.DOFade(0f, 0.8f).SetEase(Ease.OutQuad).OnComplete(() => bgmSource.Stop());
+            // 不在这里停 BGM —— MainScene -> 其它场景时音乐应继续。
+            // 需要暂停的场景（如谱面播放）由它自己处理。
         }
 
         public void SetBgmVolume(float v)
         {
-            if (bgmSource == null) return;
-            bgmSource.DOKill();
-            bgmSource.DOFade(v, 0.3f);
+            BgmManager.Instance.SetVolume(v, 0.3f);
         }
 
         private void Update()
