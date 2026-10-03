@@ -30,6 +30,11 @@ namespace MainCore.UI.Selection
         private void Start()
         {
             GlobalSetting.Reset();
+
+            // 选曲界面自己会播曲子预览，不需要全局BGM。
+            // 用 Suspend 而不是 Stop —— 回到MainScene 时能从原进度续上。
+            BgmManager.Instance?.Suspend();
+
             back.onClick.AddListener(() =>
             {
                 PlayUiSound();

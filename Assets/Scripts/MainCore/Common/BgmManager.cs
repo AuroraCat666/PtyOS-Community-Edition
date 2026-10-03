@@ -58,6 +58,9 @@ namespace MainCore.Common
         /// <summary>是否已经起播过。跨场景时用于判断是"继续"还是"重新开始"。</summary>
         public bool Playing { get; private set; }
 
+        /// <summary>是否被 <see cref="Suspend"/> 故意暂停。见该方法说明。</summary>
+        private bool suspended;
+
         /// <summary>
         /// 全局访问点。首次调用时自动创建宿主对象，
         /// 因此不依赖任何场景预挂组件。
@@ -95,7 +98,7 @@ namespace MainCore.Common
         /// </summary>
         private void Update()
         {
-            if (!Playing) return;
+            if (!Playing || suspended) return;
             if (source != null && source.isPlaying)
             {
                 lastTime = source.time;
@@ -120,7 +123,7 @@ namespace MainCore.Common
         /// </summary>
         public void Resume()
         {
-            if (!Playing) return;
+            if (!Playing || suspended) return;
 
             if (clip == null) clip = Resources.Load<AudioClip>(ClipPath);
 
@@ -199,11 +202,16 @@ namespace MainCore.Common
             source.loop = true;
             source.playOnAwake = false;
             source.volume = 0f;
-            source.time = 0f;
+
+            // 被Suspend 过就从暂停处续上，否则从头开始
+            var len = clip.length;
+            var resumeFrom = suspended && len > 0.05f && lastTime > 0.05f;
             source.Play();
+            if (resumeFrom)
+                source.time = Mathf.Repeat(Mathf.Clamp(lastTime, 0f, len - 0.05f), len);
 
             Playing = true;
-            lastTime = 0f;
+            suspended = false;
             playFrame = Time.frameCount;
             FadeTo(volume, FadeInTime, Ease.InQuad);
         }
@@ -245,7 +253,42 @@ namespace MainCore.Common
             SetVolume(sceneVolume, fadeTime);
         }
 
-        /// <summary>停止 BGM 并重置状态（下次 Play() 会从头开始）。</summary>
+        /// <summary>
+        /// 暂时停掉 BGM，但保留"应该继续放"的意图。
+        /// 用于选曲、多人游戏这类自带音乐/不需要背景乐的界面：
+        /// 离开时记下进度，从这些界面回来后调 <see cref="Play"/> 就能从原位置续上，
+        /// 而不是从头重播。
+        /// </summary>
+        public void Suspend()
+        {
+            if (source != null && source.isPlaying) lastTime = source.time;
+            if (source != null)
+            {
+                source.DOKill();
+                source.Stop();
+            }
+
+            // 用 suspend 标记而不是 Playing=false：看门狗据此判断是"故意暂停"，
+            // 不会在界面里自己复活，但 Play() 仍会恢复。
+            suspended = true;
+        }
+
+        /// <summary>
+        /// 解除 <see cref="Suspend"/>，从暂停处继续播放。已经在播时是空操作。
+        /// </summary>
+        public void ResumeFromSuspend()
+        {
+            if (!suspended) return;
+            suspended = false;
+            Play();
+        }
+
+        /// <summary>当前是否处于"故意暂停"状态。</summary>
+        public bool Suspended => suspended;
+
+        /// <summary>
+        /// 立即停止 BGM 并重置状态（下次 Play() 会从头开始）。
+        /// </summary>
         public void Stop()
         {
             if (source == null) return;
@@ -254,6 +297,7 @@ namespace MainCore.Common
             source.DOKill();
             source.Stop();
             Playing = false;
+            suspended = false;
         }
 
         private void FadeTo(float target, float time, Ease ease)

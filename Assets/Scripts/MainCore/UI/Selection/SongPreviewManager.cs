@@ -118,7 +118,7 @@ namespace MainCore.UI.Selection
             AudioClip loaded;
             try
             {
-                loaded = await Util.ReadMusicAsAudioClipAsync(full);
+                loaded = await Util.ReadMusicAsAudioClipAsync(full, "", compressedInMemory: true);
             }
             catch (Exception e)
             {

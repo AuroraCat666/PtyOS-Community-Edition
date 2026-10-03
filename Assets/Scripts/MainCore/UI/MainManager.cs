@@ -205,6 +205,10 @@ namespace MainCore.UI
             // 音乐从 EntryScene 起播后一直在循环，这里不重新 Play()，
             // 只把音量压低，避免主页面的音乐盖住 UI 音效。
             // BgmManager 挂在 DontDestroyOnLoad 对象上，跨场景不会断。
+            //
+            // 但从选曲/ 多人游戏回来时那边是 Suspend() 停的，
+            // 所以要先解除暂停（从原进度续上），再压低音量。
+            BgmManager.Instance.ResumeFromSuspend();
             BgmManager.Instance.SetSceneVolume(BgmManager.MainSceneVolume, 0.8f);
         }
 

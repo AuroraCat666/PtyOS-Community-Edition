@@ -79,6 +79,10 @@ public class MPServerTest : MonoBehaviour
 
     private void Awake()
     {
+        // 多人游戏界面不需要全局BGM（曲子里自带对局音乐）。
+        // 用 Suspend 而不是Stop —— 回到 MainScene 时能从原进度续上。
+        BgmManager.Instance?.Suspend();
+
         // ZipConstants.DefaultCodePage = 65001; // UTF-8
         buttonToState = new()
         {

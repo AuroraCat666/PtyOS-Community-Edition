@@ -105,7 +105,7 @@ namespace MainCore.Utilities
         //     return audioClip;
         // }
 
-        public static async UniTask<AudioClip> ReadMusicAsAudioClipAsync(string path, string clipName = "")
+        public static async UniTask<AudioClip> ReadMusicAsAudioClipAsync(string path, string clipName = "", bool compressedInMemory = false)
         {
             // AudioAsset audioAsset = new AudioAsset();
             // byte[] readAllBytesAsync = await File.ReadAllBytesAsync(path);
@@ -118,11 +118,23 @@ namespace MainCore.Utilities
             //     false);
             // audioClip.SetData(pcmBuffer, 0);
             // return audioClip;
-            
+
             AudioType? audioType = await GetAudioTypeFromFile(path);
             //await UniTask.SwitchToMainThread();
             //Uri.TryCreate(path, UriKind.Absolute, out Uri uri);
             UnityWebRequest uwr = UnityWebRequestMultimedia.GetAudioClip(FilePathToUri(path), audioType??AudioType.UNKNOWN);
+
+            // compressedInMemory = false（默认）时，DownloadHandlerAudioClip 建出来的 clip 是
+            // DecompressOnLoad：整首歌会在 Play() 的那一刻于主线程整体解压成 PCM，
+            // 一首 4 分钟的歌就是几十 MB 的分配 + 解码，界面必然卡一下。
+            // 传 true 则保持压缩、播放时由音频线程边播边解。
+            //
+            // 注意：必须在 SendWebRequest 之前设置。
+            if (compressedInMemory && uwr.downloadHandler is DownloadHandlerAudioClip audioHandler)
+            {
+                audioHandler.compressed = true;
+            }
+
             await uwr.SendWebRequest();
             if (uwr.result != UnityWebRequest.Result.Success) throw new ArgumentException();
             AudioClip audioClip1 = DownloadHandlerAudioClip.GetContent(uwr);
