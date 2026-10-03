@@ -9,7 +9,7 @@ namespace MainCore.Common
         private void Awake()
         {
             Text text = GetComponent<Text>();
-            text.text = $"PtyOS(Community Edition.) V0.5.1 by kagari939 & Yuncishu\n";
+            text.text = $"PtyOS(Community Edition.) V0.6 by kagari939 & Yuncishu\n";
         }
         // Start is called before the first frame update
         void Start()
