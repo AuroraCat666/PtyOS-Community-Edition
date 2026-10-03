@@ -6,6 +6,7 @@ using System.Linq;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Cysharp.Threading.Tasks;
+using MainCore.Common;
 using MainCore.Data;
 using MainCore.Settings;
 using MainCore.UI.Utils;
@@ -51,7 +52,13 @@ namespace MainCore.Utilities
         {
             var config = AudioSettings.GetConfiguration();
             config.dspBufferSize = (int)Math.Pow(2, pow);
-            return AudioSettings.Reset(config);
+            var ok = AudioSettings.Reset(config);
+
+            // AudioSettings.Reset 会停掉所有 AudioSource，BGM 会被一起干掉。
+            // 这里主动让它从原进度续上；不播 BGM 时是空操作。
+            BgmManager.ResumeIfPlaying();
+
+            return ok;
         }
 
         public static void Print(this Exception exception)

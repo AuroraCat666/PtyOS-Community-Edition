@@ -37,6 +37,18 @@ namespace MainCore.Common
         private AudioSource source;
         private AudioClip clip;
 
+        /// <summary>
+        /// 最近一次记录的播放位置。AudioSettings.Reset 会把 AudioSource 停掉
+        /// 且进度归零，恢复时要用它接着放，不能从头重来。
+        /// </summary>
+        private float lastTime;
+
+        /// <summary>起播那一帧。避免 Update 里的看门狗在同一起播帧误判成"被打断"。</summary>
+        private int playFrame = -1;
+
+        /// <summary>资源加载失败后的重试冷却帧，避免每帧重试。</summary>
+        private int retryAfterFrame;
+
         /// <summary>当前目标音量。设置页调音量时也走这里。</summary>
         private float volume = 1f;
 
@@ -72,7 +84,80 @@ namespace MainCore.Common
         /// 当前播放进度（秒）。用于验证"是否真的在继续播"。
         /// 刻意不叫 Time —— 那会遮蔽 UnityEngine.Time，类内以后写 Time.deltaTime 会踩坑。
         /// </summary>
-        public float PlaybackTime => source != null && source.isPlaying ? source.time : 0f;
+        public float PlaybackTime => source != null && source.isPlaying ? source.time : lastTime;
+
+        /// <summary>
+        /// 看门狗：AudioSettings.Reset（切 DSP 缓冲）、某些场景初始化等操作会
+        /// 强行停掉所有 AudioSource，音频不会自己回来。这里每帧检查一次，
+        /// 发现"本该在播却没播"就用记录的进度续上。
+        ///
+        /// 只在 Playing 为 true 时生效，所以主动 Stop() 之后不会被自动复活。
+        /// </summary>
+        private void Update()
+        {
+            if (!Playing) return;
+            if (source != null && source.isPlaying)
+            {
+                lastTime = source.time;
+                return;
+            }
+
+            // 起播当帧不算异常
+            if (Time.frameCount <= playFrame + 1) return;
+
+            // 切到后台时 Unity 会停音频，此时不该抢着重播
+            if (!Application.isFocused) return;
+
+            // 资源加载失败时每帧重试会刷爆日志，冷却一下
+            if (Time.frameCount < retryAfterFrame) return;
+
+            Resume();
+        }
+
+        /// <summary>
+        /// 恢复播放：从 lastTime 续上，而不是从头开始。
+        /// 音频被系统级操作打断时用它。
+        /// </summary>
+        public void Resume()
+        {
+            if (!Playing) return;
+
+            if (clip == null) clip = Resources.Load<AudioClip>(ClipPath);
+
+            // AudioSettings.Reset 会重建底层音频缓冲，旧的 clip 引用可能已经失效。
+            // 未加载完就重新 Load 一次（Resources 命中缓存，无额外开销）。
+            if (clip != null && clip.loadState != AudioDataLoadState.Loaded)
+                clip = Resources.Load<AudioClip>(ClipPath);
+
+            if (clip == null)
+            {
+                retryAfterFrame = Time.frameCount + 60;
+                return;
+            }
+
+            if (source == null) source = gameObject.AddComponent<AudioSource>();
+            source.clip = clip;
+            source.loop = true;
+            source.playOnAwake = false;
+            source.volume = 0f;
+            source.Play();
+            // Streaming 类型的 clip 要先 Play 再定位，否则 seek 可能被忽略。
+            // length 未知（Streaming 刚起播读不到）时退回 0 从头播。
+            var len = clip.length;
+            if (len > 0.05f)
+                source.time = Mathf.Repeat(Mathf.Clamp(lastTime, 0f, len - 0.05f), len);
+            playFrame = Time.frameCount;
+            FadeTo(volume, FadeInTime, Ease.InQuad);
+        }
+
+        /// <summary>
+        /// 主动打断音频后（例如切 DSP 缓冲），由调用方转调这里续上。
+        /// 内部会在下一帧的看门狗里兜底，这里立即做一次是为了听感无缝。
+        /// </summary>
+        public static void ResumeIfPlaying()
+        {
+            if (instance != null) instance.Resume();
+        }
 
         /// <summary>
         /// 基类 MonoSingleton 已有 public Awake()，这里必须重写 OnAwake()。
@@ -114,9 +199,12 @@ namespace MainCore.Common
             source.loop = true;
             source.playOnAwake = false;
             source.volume = 0f;
+            source.time = 0f;
             source.Play();
 
             Playing = true;
+            lastTime = 0f;
+            playFrame = Time.frameCount;
             FadeTo(volume, FadeInTime, Ease.InQuad);
         }
 
@@ -161,6 +249,8 @@ namespace MainCore.Common
         public void Stop()
         {
             if (source == null) return;
+            // 记录当前进度，ResumeIfPlaying / 看门狗恢复时从这里续
+            if (source.isPlaying) lastTime = source.time;
             source.DOKill();
             source.Stop();
             Playing = false;
