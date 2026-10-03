@@ -3,5 +3,8 @@ obj/
 data/
 logs/
 .git/
+.env
+.env.*
+!.env.example
 *.user
 *.suo
