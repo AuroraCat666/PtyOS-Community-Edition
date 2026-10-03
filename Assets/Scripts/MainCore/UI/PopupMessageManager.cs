@@ -32,26 +32,57 @@ namespace MainCore.UI
         private const float TextPaddingX = 34f;
 
         private const float ShowDuration = 3f;
-        private const float FadeInTime = 0.26f;
-        private const float FadeOutTime = 0.20f;
+
+        /// <summary>展开时长。放慢到 0.45s，让展开过程看得清。</summary>
+        private const float FadeInTime = 0.45f;
+
+        /// <summary>自动消失时的收回时长。</summary>
+        private const float FadeOutTime = 0.34f;
 
         /// <summary>
         /// 替换时的收回时长：旧条先合上，再用新内容重新展开。
         /// 这段等待计入总时长，所以新提示不会"立刻"出现，
         /// 而是有清晰的「旧消息退场 → 新消息入场」两段节奏。
         /// </summary>
-        private const float SwapOutTime = 0.13f;
+        private const float SwapOutTime = 0.32f;
 
         /// <summary>条高 / 字号 的比例，18px 文字对应 32px 条高 ≈ 1.78。</summary>
         private const float HeightPerFontSize = 1.78f;
 
-        private static float EaseOut(float t) => 1f - (1f - t) * (1f - t);
+        /// <summary>展开回弹的过冲量，0.1 约等于超出 10%。</summary>
+        private const float Overshoot = 0.1f;
+
+        private static float EaseOut(float t)
+        {
+            var inv = 1f - t;
+            return 1f - inv * inv * inv;
+        }
+
+        /// <summary>
+        /// 带回弹的展开曲线：先冲过 100% 再回落。
+        /// 纯 ease-out 在慢速下前段变化太小，看起来像"突然出现"，
+        /// 加一点过冲让起步和收尾都有明确的运动感。
+        /// </summary>
+        private static float EaseOutBack(float t)
+        {
+            var c1 = 1.70158f + Overshoot;
+            var c3 = c1 + 1f;
+            var inv = t - 1f;
+            return 1f + c3 * inv * inv * inv + c1 * inv * inv;
+        }
 
         private readonly Queue<string> pending = new();
 
         private float timer;
         private bool shown;
-        private float progress;
+
+        /// <summary>
+        /// 展开动画的**线性**时间进度（0→1）。
+        /// 必须和显示值分开存：以前 SetProgress 会把缓动后的值写回 progress，
+        /// 下一帧又拿它当起点继续累加，导致动画实际远快于设定时长。
+        /// </summary>
+        private float showTime;
+
         private float fadeOutTimeLeft;
         private bool fadingOut;
 
@@ -96,6 +127,7 @@ namespace MainCore.UI
                         hasPendingShow = false;
                         shown = true;
                         timer = ShowDuration;
+                        showTime = 0f;
                         SetProgress(0f);
                     }
                 }
@@ -113,10 +145,10 @@ namespace MainCore.UI
                 return;
             }
 
-            if (progress < 1f)
+            if (showTime < 1f)
             {
-                progress = Mathf.Min(1f, progress + Time.deltaTime / FadeInTime);
-                SetProgress(EaseOut(progress));
+                showTime = Mathf.Min(1f, showTime + Time.deltaTime / FadeInTime);
+                SetProgress(EaseOutBack(showTime));
             }
 
             timer -= Time.deltaTime;
@@ -217,7 +249,8 @@ namespace MainCore.UI
             hasPendingShow = false;
             fadeOutTimeLeft = 0f;
             timer = ShowDuration;
-            // 从 0 重新展开（ease-out 由 Update 逐帧推进）
+            // 从 0 重新展开（ease-out-back 由 Update 逐帧推进）
+            showTime = 0f;
             SetProgress(0f);
         }
 
@@ -266,8 +299,6 @@ namespace MainCore.UI
         /// </summary>
         private void SetProgress(float value)
         {
-            progress = value;
-
             if (background != null)
             {
                 var scale = background.rectTransform.localScale;
@@ -278,8 +309,9 @@ namespace MainCore.UI
             if (content != null)
             {
                 var color = content.color;
-                // 文字比背景稍早淡入，避免条子还在展开时文字已完全清晰
-                color.a = Mathf.Clamp01(value * 1.6f);
+                // 文字比背景稍晚淡入：条子先展开到位，文字才完全清晰，
+                // 这样能看清"背景先到、文字后到"的两段节奏。
+                color.a = Mathf.Clamp01((value - 0.15f) * 1.8f);
                 content.color = color;
             }
         }
