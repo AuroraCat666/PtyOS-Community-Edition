@@ -65,6 +65,29 @@ Phigros 4.0 第九章引入的「红区」机制：谱面里会出现一块（�
    因此 `BlockAreaManager.UpdateBlocking` 的顺序是：
    `EnsureUpdated`（解算几何）→ 算 `_blockedFingers` → `CollectTouches`（只收这些），
    而绘制收口在 `LateUpdate`，保证用的就是本帧的断触结果。
+8. **阻断是「手指生命周期」，不是「区域生命周期」**。官方称这个状态为 `infected`，
+   源码注释原话是 *"Infection is a finger lifetime, not a field lifetime. Quiet frames
+   must retain it until an explicit Ended/Cancelled event."*
+
+   手指在按下的这段时间里**只要曾经**落进活跃红区，就一直保持阻断 ——
+   之后滑出红区、甚至红区自己已经消失，阻断和 hover 特效都**不会**恢复，
+   直到这根手指抬起。实现见 `BlockAreaManager._infected`：
+
+   ```csharp
+   // 官方 judge.rs（注意传给 finger_blocked 的是硬编码的 Stationary）
+   if matches!(phase, Started | Ended | Cancelled) { infected.remove(&id); }
+   if matches!(phase, Ended | Cancelled) { return false; }
+   if inside { infected.insert(id); }
+   return infected.contains(&id)
+   // 调用侧：let inside = !infected.contains(&id) && touch_blocked(p, t, aspect);
+   ```
+
+   两个容易踩的点：
+   - **要用稳定 id，不能用数组下标**。`Input.GetTouch(i)` 的 i 在一根手指抬起后
+     会让后面的手指前移，用下标存感染会把状态串到别的手指上。所以 `Finger.Id`
+     在输入层被赋成 `Touch.fingerId`（≥0）、鼠标 `-1`、键盘 `-(int)KeyCode - 2`。
+   - **`!infected.contains(id) &&` 这个短路不是优化，是语义本身** —— 已感染的手指
+     不再重算几何，所以红区消失后它仍然保持。
 
 ## 出问题时的第一反应：整屏洋红
 

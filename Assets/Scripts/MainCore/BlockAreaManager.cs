@@ -33,7 +33,30 @@ namespace MainCore
         private const float TouchInsetScreenHeightRatio = 0.05f;
 
         private readonly List<BlockAreaController> _blocks = new List<BlockAreaController>();
+        /// <summary>本帧被红区吃掉的手指（**数组下标**，判定层按它排除手指）。</summary>
         private readonly HashSet<int> _blockedFingers = new HashSet<int>();
+
+        /// <summary>
+        /// 官方 <c>JudgeControl.infected</c>（Phira-Pro <c>judge.rs::finger_blocked</c>）。
+        ///
+        /// 它是**手指生命周期**而不是**区域生命周期**的状态：
+        /// 「Infection is a finger lifetime, not a field lifetime. Quiet frames must
+        /// retain it until an explicit Ended/Cancelled event.」
+        ///
+        /// 手指只要在按下的这段时间里**曾经**落在活跃红区内，就被感染；
+        /// 之后即使滑出红区、甚至红区本身已经消失，仍然保持阻断（hover 特效也保留），
+        /// 直到这根手指抬起为止。
+        ///
+        /// key 用 <see cref="Finger.Id"/>（跨帧稳定），**不能用数组下标** ——
+        /// Unity 的 <c>Input.GetTouch(i)</c> 的下标会随手指抬起前移，用下标存会串到别的指头上。
+        /// </summary>
+        private readonly HashSet<int> _infected = new HashSet<int>();
+
+        /// <summary>本帧还活着的手指 id（用来清理抬手后残留的感染）。</summary>
+        private readonly HashSet<int> _liveFingers = new HashSet<int>();
+
+        /// <summary>清理 <see cref="_infected"/> 时的复用缓冲，避免每帧产生委托分配。</summary>
+        private readonly List<int> _staleScratch = new List<int>(8);
 
         /// <summary>每帧收集的 chart space 几何，交给噪域绘制层。</summary>
         private BlockAreaZone[] _zoneBuffer;
@@ -343,6 +366,10 @@ namespace MainCore
         /// <summary>
         /// 扫描所有手指，标记落在 Active 块上的那些。等价官方 CheckBlocks。
         /// 应在音符判定之前调用。
+        ///
+        /// 阻断状态带**感染**（infection）语义，见 <see cref="_infected"/>：
+        /// 手指在按下的这段时间里只要曾经落进活跃红区，就一直保持阻断到抬手，
+        /// 中途滑出红区不会恢复。这是官方行为（Phira-Pro `judge.rs::finger_blocked`）。
         /// </summary>
         public void UpdateBlocking(Finger[] fingers, int count, float now)
         {
@@ -350,17 +377,57 @@ namespace MainCore
             EnsureUpdated(now);
 
             _blockedFingers.Clear();
-            for (int i = 0; i < count && i < fingers.Length; i++)
+            _liveFingers.Clear();
+
+            int n = Mathf.Min(count, fingers.Length);
+            for (int i = 0; i < n; i++)
             {
-                if (fingers[i] == null) continue;
-                if (IsBlockedAt(fingers[i].newPosition))
+                var finger = fingers[i];
+                if (finger == null) continue;
+
+                int id = finger.Id;
+                _liveFingers.Add(id);
+
+                // 抬手：官方在输入层的 Ended / Cancelled 分支里 infected.remove(id)，
+                // 并且这根手指不再阻断（finger_blocked 直接 return false）。
+                if (finger.phase == TouchPhase.Ended || finger.phase == TouchPhase.Canceled)
+                {
+                    _infected.Remove(id);
+                    continue;
+                }
+
+                // 新按下：官方 Started 分支里的 infected.remove(id)。
+                // （官方给 finger_blocked 传的是硬编码 TouchPhase::Stationary，
+                //   所以「按下清感染」发生在输入层而不是那个函数内部，这里等价补上。）
+                if (finger.phase == TouchPhase.Began)
+                    _infected.Remove(id);
+
+                // 官方：`let inside = !infected.contains(&id) && touch_blocked(p, t, aspect);`
+                // 已感染的手指**跳过几何测试** —— 这正是「感染后滑出红区仍然保持」的
+                // 实现方式本身，顺带省掉每帧重复做一次奇偶运算。
+                if (!_infected.Contains(id) && IsBlockedAt(finger.newPosition))
+                    _infected.Add(id);
+
+                if (_infected.Contains(id))
                     _blockedFingers.Add(i);
+            }
+
+            // 抬手的手指会落到 count 之外（numOfFingers 变小），上面的循环遍历不到，
+            // 靠「本帧活跃 id 集合」把残留的感染清掉 —— 否则会挂着幽灵阻断不放。
+            // 官方靠 Ended / Cancelled 事件做这件事，我们这里用活跃集合同样能保证收敛。
+            if (_infected.Count > 0)
+            {
+                _staleScratch.Clear();
+                foreach (int id in _infected)
+                    if (!_liveFingers.Contains(id)) _staleScratch.Add(id);
+                for (int k = 0; k < _staleScratch.Count; k++) _infected.Remove(_staleScratch[k]);
             }
 
             // 收集本帧的 hover 触摸点。**只收被阻断的手指** —— 官方传给噪域
             // 渲染的是 blocked_touches（见 Phira-Pro `chart.rs::render_block_overlay`），
             // 不是全部触摸。所以「谱面这一段没有噪域」或者「手指按在噪域之外」时
             // 不会有任何触摸特效，只有真正被噪域吃掉的手指才有。
+            // 感染保持时这里也自然会继续喂，特效因此跟着手指保留到抬手。
             CollectTouches(fingers, count);
 
             IsTouchingAnyBlock = _blockedFingers.Count > 0;

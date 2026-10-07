@@ -8,6 +8,16 @@ namespace MainCore
 {
     public class Finger
     {
+        /// <summary>
+        /// 跨帧稳定的手指标识（同一根手指从按到抬之间不变）。
+        ///
+        /// 红区的「感染」状态（官方 <c>infected</c>）必须挂在**手指**上而不是数组下标上：
+        /// Unity 的 <c>Input.GetTouch(i)</c> 的 i 在一根手指抬起后会让后面的手指前移，
+        /// 用下标存感染会导致状态串到别的手指上。取值见
+        /// <see cref="JudgementManager.MouseFingerId"/> / <see cref="JudgementManager.KeyboardFingerId"/>。
+        /// </summary>
+        public int Id;
+
         private int flickCnt = 0;
         Vector2 flickDirection;
         public bool isNewFlick;
@@ -104,6 +114,15 @@ namespace MainCore
         private Array keys;
 
         /// <summary>
+        /// 鼠标的稳定手指 id。触摸用 <c>Touch.fingerId</c>（恒 ≥ 0），
+        /// 鼠标与键盘取负值，天然不会冲突。
+        /// </summary>
+        public const int MouseFingerId = -1;
+
+        /// <summary>键盘按键的稳定手指 id —— 每个 KeyCode 一个，与按下的先后顺序无关。</summary>
+        public static int KeyboardFingerId(KeyCode key) => -(int)key - 2;
+
+        /// <summary>
         /// 指针（触摸/鼠标）占用的手指数。键盘手指从它之后开始排，
         /// 这样 numOfFingers 永远等于「真实有效的手指数」，
         /// 而不是旧实现里的 t+1（没按键时也至少留 1 个手指）。
@@ -156,6 +175,7 @@ namespace MainCore
             for (int i = 0; i < _pointerCount; i++)
             {
                 Touch touch = Input.GetTouch(i);
+                fingers[i].Id = touch.fingerId;
                 fingers[i].UpdatePhase(touch.phase);
                 fingers[i].newPosition = touch.position;
                 fingers[i].CheckInput();
@@ -206,6 +226,7 @@ namespace MainCore
                 if (index >= fingers.Length)
                     break;
 
+                fingers[index].Id = KeyboardFingerId(key);
                 fingers[index].UpdatePhase(Input.GetKeyDown(key) ? TouchPhase.Began : TouchPhase.Moved);
                 fingers[index].newPosition = new Vector2(0f, 0f);
                 fingers[index].CheckInput(isKey: true);
@@ -234,6 +255,7 @@ namespace MainCore
             if (Input.GetMouseButtonDown(0)) fingers[0].phase = TouchPhase.Began;
             else if (Input.GetMouseButton(0)) fingers[0].phase = TouchPhase.Moved;
             else if (Input.GetMouseButtonUp(0)) fingers[0].phase = TouchPhase.Ended;
+            fingers[0].Id = MouseFingerId;
             fingers[0].newPosition = Input.mousePosition;
             fingers[0].CheckInput();
             _pointerCount = Input.GetMouseButton(0) ? 1 : 0;
