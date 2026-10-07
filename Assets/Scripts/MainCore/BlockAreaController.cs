@@ -16,11 +16,16 @@ namespace MainCore
     {
         public BlockArea Info { get; private set; }
 
+        /// <summary>在谱面 blockAreaList 中的下标，仅用于日志。</summary>
+        public int Index { get; set; }
+
         private SpriteRenderer _renderer;
-        private SpriteMask _mask;
+        /// <summary>SpriteRenderer 自带的默认材质（Sprites/Default），预警期要切回它。</summary>
+        private Material _previewMaterial;
         private float _screenWidth;
         private float _screenHeight;
         private float _localZ;
+        private bool _loggedFirstVisible;
 
         // 官方调参。取值来自 Phira-Pro（prpr/src/core/block.rs）对官方
         // JudgeControl 常量的交叉标注，与上一版凭印象写的 0.03 不同：
@@ -35,7 +40,7 @@ namespace MainCore
         private static Sprite _unitSprite;
 
         /// <summary>单位 quad：1×1 白色贴图，pixelsPerUnit = 1，使 localScale 直接等于世界尺寸。</summary>
-        private static Sprite UnitSprite
+        public static Sprite UnitSprite
         {
             get
             {
@@ -66,57 +71,99 @@ namespace MainCore
             _renderer = gameObject.AddComponent<SpriteRenderer>();
             _renderer.sprite = UnitSprite;
             _renderer.drawMode = SpriteDrawMode.Simple;
-            // 红区要盖在判定线和音符之上。注意：音符用的是 "Notes" 排序层
+            // 红区要盖在判定线和音符之上。音符用的是 "Notes" 排序层
             // （比 Default 高），只调 sortingOrder 压不住，必须换到最上面的
             // "AboveNotes" 层，否则块会被音符盖住、看起来像「没显示」。
             var topLayer = ResolveTopSortingLayer();
             if (!string.IsNullOrEmpty(topLayer)) _renderer.sortingLayerName = topLayer;
-            _renderer.sortingOrder = 30000;
+
+            // 记下 SpriteRenderer 自带的材质，预警期／着色器缺失时要切回它。
+            _previewMaterial = _renderer.sharedMaterial;
+
+            // 先隐藏。第一帧 UpdateBlock 算出位姿后才会显示 ——
+            // 否则会先在屏幕中心闪一个 1x1 的白块。
+            _renderer.enabled = false;
+            _renderer.sortingOrder = BlockAreaMaterials.OrderPreview;
             _renderer.color = Color.clear;
 
             // worldPositionStays = false：块的局部坐标由我们完全接管，
             // z 用调用方算好的 localZ（见 BlockAreaManager.Create 的说明）。
             transform.SetParent(parent, false);
-            transform.localPosition = new Vector3(1000f, 0f, _localZ);
+            transform.localScale = Vector3.zero;
+            transform.localPosition = new Vector3(0f, 0f, _localZ);
+        }
 
-            if (info.isSubtract) SetupSubtractMask();
-            else _renderer.maskInteraction = SpriteMaskInteraction.VisibleOutsideMask;
+        // ============ 渲染状态 ============
+        //
+        // 之前用 SpriteMask 实现「减块挖洞」，实际跑下来红区整段不显示 ——
+        // SpriteMask 的 custom range 语义（front/back 排序层 + 序号的边界处理）
+        // 在「只有一个层」时容易整体失效，而且它和工程里 Hold 音符自带的
+        // 遮罩会互相影响。改成 stencil 方案后不再依赖任何排序层范围判断。
+        //
+        // 分三档：
+        //   Active   参与 stencil（普通块写 bit0=1 / 减块翻转 bit0），
+        //            真正的红色由 BlockAreaManager 的全屏 Fill 层统一画出。
+        //   Ready    预警，直接画一层淡红，不参与 stencil。
+        //   Disabled 同上。
+        //
+        // 判定用的 IsActive 与这里的分支是同一个函数，所以
+        // 「画出来的地方」与「手指被拦住的地方」天然一致。
+
+        /// <summary>隐藏：直接停掉渲染器，既不画颜色也不写 stencil。</summary>
+        private void SetHidden()
+        {
+            if (_renderer.enabled) _renderer.enabled = false;
+            // 顺带把 scale 归零：让 Contains 的 lossyScale 退化检查直接失败，
+            // 即使有别的代码绕过了 IsVisible 分支也不会误判命中。
+            transform.localScale = Vector3.zero;
+            transform.localPosition = new Vector3(0f, 0f, _localZ);
+        }
+
+        private void ApplyRenderState(float now)
+        {
+            bool active = Info.IsActive(now);
+
+            if (active && BlockAreaMaterials.Ready)
+            {
+                var wantMaterial = Info.isSubtract
+                    ? BlockAreaMaterials.SubtractWriter
+                    : BlockAreaMaterials.NormalWriter;
+                if (_renderer.sharedMaterial != wantMaterial) _renderer.sharedMaterial = wantMaterial;
+
+                int order = Info.isSubtract
+                    ? BlockAreaMaterials.OrderSubtractWriter
+                    : BlockAreaMaterials.OrderNormalWriter;
+                if (_renderer.sortingOrder != order) _renderer.sortingOrder = order;
+
+                // 颜色交给全屏 Fill 层，这里只写 stencil（ColorMask 0）。
+                _renderer.color = Color.white;
+            }
+            else
+            {
+                if (_renderer.sharedMaterial != _previewMaterial)
+                    _renderer.sharedMaterial = _previewMaterial;
+                if (_renderer.sortingOrder != BlockAreaMaterials.OrderPreview)
+                    _renderer.sortingOrder = BlockAreaMaterials.OrderPreview;
+                _renderer.color = BlockAreaMaterials.PreviewFill;
+            }
+
+            if (!_renderer.enabled) _renderer.enabled = true;
         }
 
         /// <summary>
-        /// 减块是「挖洞」的载体。官方用 shader + RenderTexture 做扣除，
-        /// 这里用 SpriteMask 等价实现：
-        ///
-        ///   * 减块**自己照常画成红区** —— 它单独存在时就是一个实心断触区
-        ///     （官方奇偶规则：命中奇数个减块 = 被阻断，不是「洞」）。
-        ///   * 减块同时充当遮罩，普通块设为 VisibleOutsideMask，
-        ///     于是落在减块里的那部分普通块被挖掉。
-        ///
-        /// 两者合起来正好等于官方的奇偶填充：「画出来的地方 = 断触的地方」。
-        /// 旧实现把减块画成全透明，视觉上和判定就是反的。
+        /// 每块只打一次「首次可见」日志。
+        /// 红区最容易出现的误判是「红区根本没做」——有这条日志就能一眼分清
+        /// 「代码没跑」还是「跑了但被别的东西盖住 / 位置算错了」。
         /// </summary>
-        private void SetupSubtractMask()
+        private void LogFirstVisible(float now, Vector2 pos, Vector2 size)
         {
-            var maskGo = new GameObject("SubtractMask");
-            maskGo.transform.SetParent(transform, false);
-
-            _mask = maskGo.AddComponent<SpriteMask>();
-            _mask.sprite = UnitSprite;
-            _mask.alphaCutoff = 0.1f;
-
-            string layer = ResolveTopSortingLayer();
-            if (string.IsNullOrEmpty(layer)) return;
-            int id = SortingLayer.NameToID(layer);
-            if (id == 0 && layer != "Default") return;
-
-            // 把遮罩范围限定在「红区自己所在的排序层」。
-            // 别的渲染器只要不设 maskInteraction 就不会被影响，
-            // 所以判定线、音符、UI 都不会被挖洞。
-            _mask.isCustomRangeActive = true;
-            _mask.frontSortingLayerID = id;
-            _mask.backSortingLayerID = id;
-            _mask.frontSortingOrder = 32767;
-            _mask.backSortingOrder = -32768;
+            if (_loggedFirstVisible) return;
+            _loggedFirstVisible = true;
+            Debug.Log($"[BlockArea] 块 #{Index}{(Info.isSubtract ? "（减块）" : string.Empty)} " +
+                      $"首次可见 @{now:F2}s 中心=({pos.x:F2},{pos.y:F2}) " +
+                      $"尺寸=({Mathf.Abs(size.x):F2},{Mathf.Abs(size.y):F2}) " +
+                      $"旋转={(transform.localEulerAngles.z):F1}° localZ={_localZ:F1} " +
+                      $"排序层={(_renderer.sortingLayerName ?? "?")} 启用={_renderer.enabled}");
         }
 
         // ============ 每帧变换 ============
@@ -155,9 +202,7 @@ namespace MainCore
 
             if (!Info.IsVisible(now))
             {
-                // 隐藏态：官方不切 layer，而是把块移出画面
-                transform.localPosition = new Vector3(1000f, 0f, _localZ);
-                _renderer.color = Color.clear;
+                SetHidden();
                 return;
             }
 
@@ -191,25 +236,8 @@ namespace MainCore
             transform.localEulerAngles = new Vector3(0f, 0f, rotated.rotation);
 
             // 官方 anchor 恒为 (0.5, 0.5)，这里同样固定，故不需要额外锚点世界坐标。
-            _renderer.color = GetPhaseColor(now);
-        }
-
-        private Color GetPhaseColor(float now)
-        {
-            // 官方的 Disabled / Ready 由协程 + 着色器表现；这里用透明度近似，够用且无副作用。
-            //
-            // 减块和普通块用同一套颜色：官方奇偶规则下，**看得见的地方就是断触的地方**
-            // （单独一个减块是实心断触区；减块里的普通块被遮罩挖掉、露出可操作窗口）。
-            // 旧实现把减块画成全透明，视觉与判定正好相反。
-            bool active = Info.IsActive(now);
-            if (active) return new Color(1f, 0.18f, 0.28f, 0.6f);
-
-            // 生效前的预警期：0.5s
-            float readyWindow = 0.5f;
-            bool ready = now >= Info.enableTime - readyWindow && now < Info.enableTime;
-            return ready
-                ? new Color(1f, 0.18f, 0.28f, 0.45f)
-                : new Color(0.85f, 0.15f, 0.25f, 0.32f);
+            ApplyRenderState(now);
+            LogFirstVisible(now, pos, scaled.size);
         }
 
         // ============ 命中测试 ============

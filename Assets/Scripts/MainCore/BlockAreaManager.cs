@@ -34,9 +34,20 @@ namespace MainCore
         private readonly List<BlockAreaController> _blocks = new List<BlockAreaController>();
         private readonly HashSet<int> _blockedFingers = new HashSet<int>();
 
+        /// <summary>全屏层相对游戏区的外扩，避免边缘留出 1 像素缝。</summary>
+        private const float FullscreenMargin = 1.05f;
+
         private int _lastFrame = -1;
         private float _screenWidth;
         private float _screenHeight;
+        private float _blockLocalZ;
+        private float _syncedWidth = -1f;
+        private float _syncedHeight = -1f;
+
+        /// <summary>stencil 清零层（全屏，bit0 = 0）。</summary>
+        private SpriteRenderer _stencilClearRenderer;
+        /// <summary>显示层（全屏，bit0 == 1 处画红）。</summary>
+        private SpriteRenderer _fillRenderer;
 
         private AudioSource _musicSource;
         private AudioLowPassFilter _lowPass;
@@ -73,18 +84,119 @@ namespace MainCore
             // 实在没有判定线时退回 z = 0（由场景可知相机在 -10、Game Root 在 -10，
             // 这个平面上的一切都可见）。
             float blockLocalZ = ResolveBlockLocalZ(parent);
+            manager._blockLocalZ = blockLocalZ;
 
-            foreach (var area in chart.blockAreaList)
+            for (int i = 0; i < chart.blockAreaList.Count; i++)
             {
-                var blockGo = new GameObject(area.isSubtract ? "SubtractBlock" : "Block");
+                var area = chart.blockAreaList[i];
+                var blockGo = new GameObject(area.isSubtract ? $"SubtractBlock{i}" : $"Block{i}");
                 var controller = blockGo.AddComponent<BlockAreaController>();
+                controller.Index = i;
                 controller.Initialize(area, parent, manager._screenWidth, manager._screenHeight, blockLocalZ);
                 manager._blocks.Add(controller);
             }
 
+            manager.CreateFullscreenLayers(parent, blockLocalZ);
+            manager.SyncFullscreenLayers();
             manager.LogSchedule();
 
             return manager;
+        }
+
+        // ============ 全屏层 ============
+        //
+        // 红区的形状是「普通块 XOR 减块」，没办法用一串矩形直接画出来
+        // （减块盖住普通块时，普通块自己矩形里有一块要被挖空）。
+        // 所以走 stencil：
+        //   1. StencilClear  全屏，把 bit0 抹成 0
+        //   2. 每个 Active 块写 bit0（普通块 Replace 1 / 减块 Invert）
+        //   3. Fill          全屏，只在 bit0 == 1 处画红
+        // 三步都在同一个 sorting layer 内、靠 sortingOrder 定先后。
+
+        private void CreateFullscreenLayers(Transform parent, float localZ)
+        {
+            _stencilClearRenderer = CreateFullscreenRenderer(
+                "BlockAreaStencilClear", parent, localZ,
+                BlockAreaMaterials.StencilClear,
+                BlockAreaMaterials.OrderStencilClear,
+                Color.white);
+
+            _fillRenderer = CreateFullscreenRenderer(
+                "BlockAreaFill", parent, localZ,
+                BlockAreaMaterials.Fill,
+                BlockAreaMaterials.OrderFill,
+                BlockAreaMaterials.ActiveFill);
+
+            if (!BlockAreaMaterials.Ready)
+            {
+                // 着色器没取到就整条 stencil 管线都不可用：
+                // 关掉两个全屏层，让每一块退回「直接画淡红」，
+                // 至少红区还能看见，而不是整块消失。
+                if (_stencilClearRenderer != null) _stencilClearRenderer.enabled = false;
+                if (_fillRenderer != null) _fillRenderer.enabled = false;
+            }
+        }
+
+        private static SpriteRenderer CreateFullscreenRenderer(string name, Transform parent, float localZ,
+            Material material, int order, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(0f, 0f, localZ);
+
+            var renderer = go.AddComponent<SpriteRenderer>();
+            renderer.sprite = BlockAreaController.UnitSprite;
+            renderer.drawMode = SpriteDrawMode.Simple;
+            renderer.sharedMaterial = material != null ? material : renderer.sharedMaterial;
+
+            string layer = ResolveTopSortingLayer();
+            if (!string.IsNullOrEmpty(layer)) renderer.sortingLayerName = layer;
+
+            renderer.sortingOrder = order;
+            renderer.color = color;
+            return renderer;
+        }
+
+        /// <summary>把两个全屏层铺满整个游戏区。分辨率变化时重算。</summary>
+        private void SyncFullscreenLayers()
+        {
+            if (Mathf.Approximately(_syncedWidth, _screenWidth) &&
+                Mathf.Approximately(_syncedHeight, _screenHeight))
+                return;
+
+            _syncedWidth = _screenWidth;
+            _syncedHeight = _screenHeight;
+
+            var scale = new Vector3(_screenWidth * FullscreenMargin, _screenHeight * FullscreenMargin, 1f);
+            var position = new Vector3(0f, 0f, _blockLocalZ);
+
+            if (_stencilClearRenderer != null)
+            {
+                _stencilClearRenderer.transform.localScale = scale;
+                _stencilClearRenderer.transform.localPosition = position;
+            }
+
+            if (_fillRenderer != null)
+            {
+                _fillRenderer.transform.localScale = scale;
+                _fillRenderer.transform.localPosition = position;
+            }
+        }
+
+        /// <summary>取项目里最靠上的排序层（AboveNotes 优先），红区要盖住音符。</summary>
+        private static string ResolveTopSortingLayer()
+        {
+            var layers = SortingLayer.layers;
+            if (layers == null || layers.Length == 0) return null;
+
+            foreach (var l in layers)
+                if (l.name == "AboveNotes") return l.name;
+
+            SortingLayer best = layers[0];
+            foreach (var l in layers)
+                if (l.value > best.value) best = l;
+
+            return best.name;
         }
 
         /// <summary>把「判定线/音符所在的平面」换算成块相对父物体的局部 z。</summary>
@@ -118,9 +230,10 @@ namespace MainCore
             }
 
             string first = _blocks.Count > 0 ? firstAppear.ToString("F2") + "s" : "无";
-            float localZ = _blocks.Count > 0 && _blocks[0] != null ? _blocks[0].LocalZ : 0f;
             Debug.Log($"[BlockArea] 共 {_blocks.Count} 块（普通 {normal} / 减块 {subtract}），" +
-                      $"第一块出现于 {first}，块所在局部 z={localZ:F1}");
+                      $"第一块出现于 {first}，块局部 z={_blockLocalZ:F1}，" +
+                      $"游戏区 {_screenWidth:F2}x{_screenHeight:F2}，" +
+                      $"stencil 管线={(BlockAreaMaterials.Ready ? "就绪" : "着色器缺失，已退化为矩形绘制")}");
         }
 
         private void Awake()
@@ -183,6 +296,11 @@ namespace MainCore
         {
             if (Time.frameCount == _lastFrame) return;
             _lastFrame = Time.frameCount;
+
+            // 分辨率会变（窗口缩放、宽屏遮罩），每帧重算一次游戏区尺寸，
+            // 否则块会按旧的分辨率算位置，在窗口化时整体错位。
+            RefreshScreenSize();
+            SyncFullscreenLayers();
 
             for (int i = 0; i < _blocks.Count; i++)
             {
