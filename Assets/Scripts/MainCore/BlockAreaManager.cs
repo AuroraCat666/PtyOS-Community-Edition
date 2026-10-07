@@ -52,11 +52,7 @@ namespace MainCore
             var go = new GameObject("[BlockArea]");
             var manager = go.AddComponent<BlockAreaManager>();
 
-            float orthoSize = Camera.main != null ? Camera.main.orthographicSize : 5f;
-            manager._screenHeight = 2f * orthoSize;
-            // 与判定线同一套坐标口径：用 GlobalSetting.Aspect（已按宽屏遮罩修正），
-            // 不能直接用 Camera.main.aspect，否则在 21:9 等宽屏上块会横向错位。
-            manager._screenWidth = manager._screenHeight * GlobalSetting.Aspect;
+            manager.RefreshScreenSize();
 
             foreach (var area in chart.blockAreaList)
             {
@@ -74,6 +70,35 @@ namespace MainCore
         {
             Instance = this;
         }
+
+        /// <summary>
+        /// 重算游戏区尺寸。分辨率会变、且 GlobalSetting 平时在 Update 里刷新，
+        /// 所以每帧都要重取一次，不能只在 Create 时算一次。
+        /// </summary>
+        private void RefreshScreenSize()
+        {
+            if (_screenHeight <= 0f)
+                _screenHeight = 2f * (Camera.main != null ? Camera.main.orthographicSize : 5f);
+
+            float h = _screenHeight;
+
+            // 与判定线同一套坐标口径：用 GlobalSetting.Aspect（已按宽屏遮罩修正），
+            // 不能直接用 Camera.main.aspect，否则在 21:9 等宽屏上块会横向错位。
+            float aspect = GlobalSetting.Aspect;
+
+            // 兜底：GlobalSetting 还没初始化时 Aspect 是 0/0 = NaN。
+            // 一旦用到 NaN，块的变换会全部变成 NaN 并每帧刷屏报错。
+            if (!IsFinite(aspect) || aspect <= 0f)
+            {
+                aspect = Screen.height > 0 ? Screen.width * 1f / Screen.height : 16f / 9f;
+                if (!IsFinite(aspect) || aspect <= 0f) aspect = 16f / 9f;
+            }
+
+            _screenHeight = h;
+            _screenWidth = h * aspect;
+        }
+
+        private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
 
         private void OnDestroy()
         {
@@ -103,7 +128,10 @@ namespace MainCore
             _lastFrame = Time.frameCount;
 
             for (int i = 0; i < _blocks.Count; i++)
+            {
+                _blocks[i].SetScreenSize(_screenWidth, _screenHeight);
                 _blocks[i].UpdateBlock(now);
+            }
         }
 
         // ============ 断触 ============
@@ -131,17 +159,39 @@ namespace MainCore
         /// <summary>该手指是否被红区阻断（本帧）。</summary>
         public bool IsBlocked(int fingerIndex) => _blockedFingers.Contains(fingerIndex);
 
-        /// <summary>世界坐标是否落在任一 Active 块内。等价官方 TryGetBlockingBlock。</summary>
+        /// <summary>
+        /// 世界坐标是否被红区阻断。等价官方 TryGetBlockingBlock。
+        ///
+        /// 关键语义：减块（isSubtract）不阻断触摸，只影响渲染（把红区挖掉一块、
+        /// 露出底下的画面）。触摸上直接跳过减块，只统计普通块。
+        ///
+        /// 不这样处理会直接毁掉游戏：实测谱面的块 0 就是一个覆盖
+        /// 120% 屏宽 × 200% 屏高的减块，若让减块也参与阻断，整屏都会变成断触区。
+        ///
+        /// 已知取舍：块 22（300% 屏全屏红区）+ 块 23（100% 屏减块）这组
+        /// 原意应是「全屏红区、中间挖出一个可操作的洞」，当前实现下洞内仍会被
+        /// 块 22 阻断。要让洞真正可操作，需要改成
+        /// 「命中普通块 && 未被任何减块覆盖」的判定，但那会让块 0 把全部
+        /// 21 个小块一并挖空。两者只能取其一，待实机对照官方行为后再定。
+        /// </summary>
         public bool TryGetBlockingBlock(Vector2 worldPosition, out BlockAreaController blockingBlock)
         {
+            float now = CurrentTime;
+
             for (int i = 0; i < _blocks.Count; i++)
             {
                 var block = _blocks[i];
-                if (block != null && block.IsActive(CurrentTime) && block.IsPositionInside(worldPosition))
-                {
-                    blockingBlock = block;
-                    return true;
-                }
+                if (block == null || !block.IsActive(now)) continue;
+
+                // 减块自身不阻断触摸。它是「从红区中挖掉一块」的区域，
+                // 只影响渲染（露出底下的画面），不产生断触。
+                if (block.IsSubtract) continue;
+
+                if (!block.IsPositionInside(worldPosition)) continue;
+
+                // 命中即返回，与官方 TryGetBlockingBlock 一致（不取最优、只取首个）
+                blockingBlock = block;
+                return true;
             }
 
             blockingBlock = null;

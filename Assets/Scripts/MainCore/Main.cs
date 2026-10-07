@@ -206,8 +206,26 @@ namespace MainCore
 
             //Init 红区（BlockArea）—— Phigros 4.0 第九章机制
             //必须在 _audioSource 建好之后，按住块时要给它挂低通滤波。
+            //且必须先算好游戏区尺寸：红区与判定线共用 GlobalSetting.Aspect，
+            //而它平时在 Update 里刷新，Awake 阶段仍是 0，直接读会得到 0/0 = NaN。
+            RefreshGameAreaSize();
             var blockArea = BlockAreaManager.Create(ChartLoader.Chart, instantiateTransform);
             blockArea?.AttachMusicSource(_audioSource);
+        }
+
+        /// <summary>
+        /// 按当前分辨率重算游戏区宽高（宽屏时加遮罩把游戏区锁到 16:9）。
+        /// 只写 GlobalSetting，不动 maskSprite —— 那个由 Update 每帧维护。
+        /// </summary>
+        private void RefreshGameAreaSize()
+        {
+            if (Screen.height <= 0) return;
+
+            float aspect = Screen.width * 1f / Screen.height;
+            GlobalSetting.ScreenHeight = Screen.height;
+            GlobalSetting.ScreenWidth = aspect >= Standard916Aspect
+                ? Screen.height * Standard916Aspect
+                : Screen.width;
         }
 
         private void Start()

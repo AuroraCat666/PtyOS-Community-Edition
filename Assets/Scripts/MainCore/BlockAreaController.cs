@@ -66,6 +66,15 @@ namespace MainCore
 
         // ============ 每帧变换 ============
 
+        /// <summary>由管理器每帧下发最新游戏区尺寸（分辨率可能变化）。</summary>
+        public void SetScreenSize(float screenWidth, float screenHeight)
+        {
+            _screenWidth = screenWidth;
+            _screenHeight = screenHeight;
+        }
+
+        private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+
         /// <param name="now">谱面时间（秒），对应官方 progressControl.nowTime。</param>
         public void UpdateBlock(float now)
         {
@@ -94,6 +103,13 @@ namespace MainCore
             var rotated = UpdateRotation(scaled.center, now);
             Vector2 pos = UpdateMovement(baseCenter, rotated.center, now);
 
+            // 最后一道兜底：任一步算出 NaN/Inf 会让 Transform 每帧刷屏报错。
+            // 这里直接跳过本帧赋值、保留上一帧姿态，宁可静止也不污染场景。
+            if (!IsFinite(pos.x) || !IsFinite(pos.y) ||
+                !IsFinite(scaled.size.x) || !IsFinite(scaled.size.y) ||
+                !IsFinite(rotated.rotation))
+                return;
+
             transform.localPosition = new Vector3(pos.x, pos.y, 0f);
             transform.localScale = new Vector3(Mathf.Abs(scaled.size.x), Mathf.Abs(scaled.size.y), 1f);
             transform.localEulerAngles = new Vector3(0f, 0f, rotated.rotation);
@@ -105,9 +121,11 @@ namespace MainCore
         private Color GetPhaseColor(float now)
         {
             // 官方的 Disabled / Ready 由协程 + 着色器表现；这里用透明度近似，够用且无副作用。
-            // 减块官方恒为 0.1 alpha（SubtractAlpha，.rodata 0xC261F0）。
+            // 减块是「挖洞」：官方 0.1 alpha 是喂给扣除着色器的参数，不是直接画出来的颜色。
+            // 这里没有 shader 扣除管线，直接画会把全屏减块变成一层粉色蒙版盖住画面，
+            // 所以改为完全透明 —— 洞里露出底下的正常画面，视觉上反而更接近官方。
             if (Info.isSubtract)
-                return new Color(1f, 0.35f, 0.9f, 0.1f);
+                return Color.clear;
 
             bool active = Info.IsActive(now);
             if (active) return new Color(1f, 0.18f, 0.28f, 0.55f);
@@ -124,6 +142,9 @@ namespace MainCore
 
         /// <summary>是否可被触摸：仅 Active 阶段参与判定，Disabled / Ready 纯为视觉预警。</summary>
         public bool IsActive(float now) => Info != null && Info.IsActive(now);
+
+        /// <summary>是否为减块：从阻断区与画面中「挖掉」一块，本身不阻断触摸。</summary>
+        public bool IsSubtract => Info != null && Info.isSubtract;
 
         /// <summary>
         /// 世界坐标是否落在本块触摸区内。等价于官方 JudgeControl.IsPositionInsideBlock。
