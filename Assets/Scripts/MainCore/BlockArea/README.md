@@ -53,6 +53,30 @@ Phigros 4.0 第九章引入的「红区」机制：谱面里会出现一块（�
    中间变量会被复用 —— 不能合并成 `(3-2v)²`。
 5. mask 覆盖的是游戏区（16:9），而 hover 必须跟全屏手指坐标对齐，
    所以在非 16:9 屏幕上两者不是同一个 UV 区间，hover 单独用了一张纹理。
+6. **别把 GLSL 的函数名抄进 HLSL**。`BlockAreaCommon.cginc` 是官方 GLSL ES
+   反编译结果的「逐行直译」，改它的时候很容易顺手把 `inversesqrt` 这类
+   GLSL 专有名字带进来 —— **HLSL 没有 `inversesqrt`，对应的是 `rsqrt`**。
+   这一处曾经让整个红区变成洋红（见下）。
+
+## 出问题时的第一反应：整屏洋红
+
+红区的绘制 quad 恰好**铺满整个游戏区**，所以只要它的着色器编译失败，
+Unity 就会把整块游戏区渲染成洋红（magenta）。中文里常被描述成「屏幕变粉」。
+
+典型症状：**不按屏幕没事，一按就整屏变粉，松开又恢复** —— 因为按下才让
+`touchVisible` 成立、从而启用 Active quad（`showActive = NonZeroCompose > 0 || touchVisible`）。
+
+先看 Console / `Logs/Editor.log` 里的 `Shader error in 'PtyOS/BlockAreaXxx'`，
+它会直接给出行号。改完着色器后建议跑一遍这个自检（在
+`Assets/Resources/Shaders/` 下执行）：
+
+```bash
+grep -nE '\b(inversesqrt|mix|mod|texture2D|texture|vec[234]|mat[234]|fract|dFdx|dFdy|fwidth)\s*\(' \
+     BlockAreaCommon.cginc BlockAreaActive.shader BlockAreaDisabled.shader
+```
+
+没有输出就说明没有 GLSL 残留。（`frac` / `exp2` / `log2` / `smoothstep` /
+`lerp` / `dot` / `rsqrt` 等都是 HLSL 合法函数，不在检查范围内。）
 
 ## 来源与许可
 
