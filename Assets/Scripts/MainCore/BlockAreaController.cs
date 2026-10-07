@@ -19,6 +19,7 @@ namespace MainCore
         private SpriteRenderer _renderer;
         private float _screenWidth;
         private float _screenHeight;
+        private float _localZ;
 
         // 官方调参（block-params.json / data.md）
         private const float TouchInsetScreenHeightRatio = 0.03f;
@@ -48,20 +49,31 @@ namespace MainCore
             }
         }
 
-        public void Initialize(BlockArea info, Transform parent, float screenWidth, float screenHeight)
+        /// <summary>块所在的局部 z（父物体为 Game Root）。等于判定线/音符所在的平面。</summary>
+        public float LocalZ => _localZ;
+
+        public void Initialize(BlockArea info, Transform parent, float screenWidth, float screenHeight, float localZ)
         {
             Info = info;
             _screenWidth = screenWidth;
             _screenHeight = screenHeight;
+            _localZ = localZ;
 
             _renderer = gameObject.AddComponent<SpriteRenderer>();
             _renderer.sprite = UnitSprite;
             _renderer.drawMode = SpriteDrawMode.Simple;
-            // 盖在所有判定线与音符之上
+            // 红区要盖在判定线和音符之上。注意：音符用的是 "Notes" 排序层
+            // （比 Default 高），只调 sortingOrder 压不住，必须换到最上面的
+            // "AboveNotes" 层，否则块会被音符盖住、看起来像「没显示」。
+            var topLayer = ResolveTopSortingLayer();
+            if (!string.IsNullOrEmpty(topLayer)) _renderer.sortingLayerName = topLayer;
             _renderer.sortingOrder = 30000;
             _renderer.color = Color.clear;
 
+            // worldPositionStays = false：块的局部坐标由我们完全接管，
+            // z 用调用方算好的 localZ（见 BlockAreaManager.Create 的说明）。
             transform.SetParent(parent, false);
+            transform.localPosition = new Vector3(1000f, 0f, _localZ);
         }
 
         // ============ 每帧变换 ============
@@ -75,6 +87,24 @@ namespace MainCore
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
 
+        /// <summary>
+        /// 取项目里最靠上的排序层。工程里定义了 AboveNotes（最上）> Notes > BeneathNotes > Default，
+        /// 优先用 AboveNotes，找不到再退回 value 最大的层。
+        /// </summary>
+        private static string ResolveTopSortingLayer()
+        {
+            var layers = SortingLayer.layers;
+            if (layers == null || layers.Length == 0) return null;
+
+            foreach (var l in layers)
+                if (l.name == "AboveNotes") return l.name;
+
+            SortingLayer best = layers[0];
+            foreach (var l in layers)
+                if (l.value > best.value) best = l;
+            return best.name;
+        }
+
         /// <param name="now">谱面时间（秒），对应官方 progressControl.nowTime。</param>
         public void UpdateBlock(float now)
         {
@@ -83,7 +113,7 @@ namespace MainCore
             if (!Info.IsVisible(now))
             {
                 // 隐藏态：官方不切 layer，而是把块移出画面
-                transform.localPosition = new Vector3(1000f, 0f, 0f);
+                transform.localPosition = new Vector3(1000f, 0f, _localZ);
                 _renderer.color = Color.clear;
                 return;
             }
@@ -110,7 +140,10 @@ namespace MainCore
                 !IsFinite(rotated.rotation))
                 return;
 
-            transform.localPosition = new Vector3(pos.x, pos.y, 0f);
+            // z 用 _localZ：世界 z = 0，与判定线/音符同一平面。
+            // 正交相机下 z 不改变屏幕位置，只决定是否落在视锥内 ——
+            // 用 0 会掉进相机近裁剪面（near=0.3）内侧被整块裁掉。
+            transform.localPosition = new Vector3(pos.x, pos.y, _localZ);
             transform.localScale = new Vector3(Mathf.Abs(scaled.size.x), Mathf.Abs(scaled.size.y), 1f);
             transform.localEulerAngles = new Vector3(0f, 0f, rotated.rotation);
 
@@ -128,14 +161,14 @@ namespace MainCore
                 return Color.clear;
 
             bool active = Info.IsActive(now);
-            if (active) return new Color(1f, 0.18f, 0.28f, 0.55f);
+            if (active) return new Color(1f, 0.18f, 0.28f, 0.6f);
 
-            // 生效前的预警期：半天
+            // 生效前的预警期：0.5s
             float readyWindow = 0.5f;
             bool ready = now >= Info.enableTime - readyWindow && now < Info.enableTime;
             return ready
-                ? new Color(1f, 0.18f, 0.28f, 0.3f)
-                : new Color(0.55f, 0.1f, 0.16f, 0.18f);
+                ? new Color(1f, 0.18f, 0.28f, 0.45f)
+                : new Color(0.85f, 0.15f, 0.25f, 0.32f);
         }
 
         // ============ 命中测试 ============
@@ -153,7 +186,9 @@ namespace MainCore
         public bool IsPositionInside(Vector2 worldPosition)
         {
             if (!TryGetTouchHalfSize(out var half)) return false;
-            Vector3 local = transform.InverseTransformPoint(new Vector3(worldPosition.x, worldPosition.y, 0f));
+            // 触摸点用与块同平面的 z，保证局部 z 恒为 0，只在 XY 上做 AABB。
+            Vector3 local = transform.InverseTransformPoint(
+                new Vector3(worldPosition.x, worldPosition.y, transform.position.z));
             return Mathf.Abs(local.x) <= half.x && Mathf.Abs(local.y) <= half.y;
         }
 

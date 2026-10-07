@@ -54,16 +54,67 @@ namespace MainCore
 
             manager.RefreshScreenSize();
 
+            // ===== 决定块所在的 z 平面 =====
+            // 判定线是用 Instantiate(prefab, GameRoot) 创建的（保留世界坐标），
+            // 所以判定线和音符实际落在 **世界 z = 0**；而 Game Root 自身在 z = -10
+            // （和正交相机同一个平面）。
+            //
+            // 块如果用 transform.SetParent(parent, false)（保持局部坐标），
+            // local z 就会停在 0 → 世界 z = -10 → 正好掉进相机近裁剪面
+            // （near = 0.3）内侧被整块裁掉。这就是「红区完全不显示」的原因。
+            //
+            // 最稳的取法：直接读一条已经创建好的判定线的世界 z，把块放到同一平面；
+            // 实在没有判定线时退回 z = 0（由场景可知相机在 -10、Game Root 在 -10，
+            // 这个平面上的一切都可见）。
+            float blockLocalZ = ResolveBlockLocalZ(parent);
+
             foreach (var area in chart.blockAreaList)
             {
                 var blockGo = new GameObject(area.isSubtract ? "SubtractBlock" : "Block");
                 var controller = blockGo.AddComponent<BlockAreaController>();
-                controller.Initialize(area, parent, manager._screenWidth, manager._screenHeight);
+                controller.Initialize(area, parent, manager._screenWidth, manager._screenHeight, blockLocalZ);
                 manager._blocks.Add(controller);
             }
 
-            Debug.Log($"[BlockArea] 已创建 {manager._blocks.Count} 块红区");
+            manager.LogSchedule();
+
             return manager;
+        }
+
+        /// <summary>把「判定线/音符所在的平面」换算成块相对父物体的局部 z。</summary>
+        private static float ResolveBlockLocalZ(Transform parent)
+        {
+            float worldZ = 0f;
+
+            var lines = GlobalSetting.Lines;
+            if (lines != null && lines.Count > 0 && lines[0] != null && lines[0].transform != null)
+                worldZ = lines[0].transform.position.z;
+
+            if (parent == null) return worldZ;
+            return parent.InverseTransformPoint(new Vector3(0f, 0f, worldZ)).z;
+        }
+
+        /// <summary>
+        /// 打一条可对照的日志：本谱面共多少块、第一个「看得见」的块在第几秒。
+        /// 红区在谱面里很可能整段前奏都不出现（Ametrine 是 64.33 秒才第一块），
+        /// 玩家从头播会觉得「红区根本没做」，这条日志能直接排除这种误判。
+        /// </summary>
+        private void LogSchedule()
+        {
+            int visible = 0, subtract = 0;
+            float firstVisible = float.MaxValue;
+            foreach (var b in _blocks)
+            {
+                if (b == null || b.Info == null) continue;
+                if (b.IsSubtract) { subtract++; continue; }
+                visible++;
+                if (b.Info.appearTime < firstVisible) firstVisible = b.Info.appearTime;
+            }
+
+            string first = visible > 0 ? firstVisible.ToString("F2") + "s" : "无";
+            float localZ = _blocks.Count > 0 && _blocks[0] != null ? _blocks[0].LocalZ : 0f;
+            Debug.Log($"[BlockArea] 共 {_blocks.Count} 块（普通 {visible} / 减块 {subtract}），" +
+                      $"第一个可见红区出现在 {first}，块所在局部 z={localZ:F1}");
         }
 
         private void Awake()
