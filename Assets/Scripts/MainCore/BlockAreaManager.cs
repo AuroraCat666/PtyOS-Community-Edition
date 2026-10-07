@@ -37,7 +37,12 @@ namespace MainCore
 
         /// <summary>每帧收集的 chart space 几何，交给噪域绘制层。</summary>
         private BlockAreaZone[] _zoneBuffer;
-        /// <summary>每帧的触摸点（屏幕 UV），驱动 hover 与触摸 SDF 高光。</summary>
+        /// <summary>本帧有效几何的数量。</summary>
+        private int _zoneCount;
+        /// <summary>
+        /// 每帧的触摸点（屏幕 UV），驱动 hover 与触摸 SDF 高光。
+        /// **只装被红区阻断的手指** —— 官方传的就是 blocked_touches，不是全部触摸。
+        /// </summary>
         private readonly List<BlockTouch> _touchBuffer = new List<BlockTouch>(16);
 
         /// <summary>
@@ -56,6 +61,8 @@ namespace MainCore
         public const float ContentWorldZ = 0f;
 
         private int _lastFrame = -1;
+        /// <summary>最近一次跑断触判定的帧号，用来判断本帧有没有被阻断的手指。</summary>
+        private int _lastBlockingFrame = -1;
         private float _screenWidth;
         private float _screenHeight;
         private float _blockLocalZ;
@@ -258,6 +265,19 @@ namespace MainCore
             EnsureUpdated(CurrentTime);
         }
 
+        /// <summary>
+        /// 噪域在帧末统一绘制。放在这里而不是 Update / UpdateBlocking 里，
+        /// 是因为 hover 只喂「被红区阻断的手指」，那个结果要等断触判定跑完才有；
+        /// 收口到 LateUpdate 就不必纠结两个 Update 谁先执行。
+        /// </summary>
+        private void LateUpdate()
+        {
+            // 本帧没走断触判定（AutoPlay、或还没接上输入）→ 没有真实被阻断的手指，
+            // 清掉 hover，否则会挂着上一次留下的光晕不放。
+            if (Time.frameCount != _lastBlockingFrame) _touchBuffer.Clear();
+            DrawNoiseField(CurrentTime);
+        }
+
         private static float CurrentTime =>
             Main.Instance != null && Main.Instance.progressManager != null
                 ? Main.Instance.progressManager.NowTime
@@ -286,7 +306,7 @@ namespace MainCore
                 for (int i = 0; i < _blocks.Count; i++) _blocks[i].SetLocalZ(localZ);
             }
 
-            // ---- 1. 解算每块的 chart space 几何 ----
+            // ---- 解算每块的 chart space 几何 ----
             EnsureZoneBuffer();
             int count = 0;
             for (int i = 0; i < _blocks.Count; i++)
@@ -296,14 +316,20 @@ namespace MainCore
                 block.UpdateBlock(now);
                 if (block.Zone.Valid) _zoneBuffer[count++] = block.Zone;
             }
+            _zoneCount = count;
+        }
 
-            // ---- 2. 噪域绘制 ----
-            if (_field != null)
-            {
-                _field.SetField(_screenWidth, _screenHeight, GlobalSetting.Aspect);
-                _field.SetTouches(_touchBuffer);
-                _field.Render(_zoneBuffer, count, now, _blockLocalZ);
-            }
+        /// <summary>
+        /// 噪域绘制（每帧一次，由 <see cref="LateUpdate"/> 触发）。
+        /// 从 EnsureUpdated 里拆出来，是因为 <see cref="_touchBuffer"/> 要等
+        /// 断触判定跑完才填得对 —— 早于此就会用上一帧的手指位置画 hover。
+        /// </summary>
+        private void DrawNoiseField(float now)
+        {
+            if (_field == null) return;
+            _field.SetField(_screenWidth, _screenHeight, GlobalSetting.Aspect);
+            _field.SetTouches(_touchBuffer);
+            _field.Render(_zoneBuffer, _zoneCount, now, _blockLocalZ);
         }
 
         private void EnsureZoneBuffer()
@@ -320,10 +346,7 @@ namespace MainCore
         /// </summary>
         public void UpdateBlocking(Finger[] fingers, int count, float now)
         {
-            // 先把本帧手指位置（屏幕 UV）喂给噪域绘制层，再驱动本帧的重绘 ——
-            // 这样 hover 光晕跟手指是同一帧的。
-            CollectTouches(fingers, count);
-
+            // 先解算本帧红区几何 —— IsBlockedAt 依赖它。
             EnsureUpdated(now);
 
             _blockedFingers.Clear();
@@ -334,12 +357,20 @@ namespace MainCore
                     _blockedFingers.Add(i);
             }
 
+            // 收集本帧的 hover 触摸点。**只收被阻断的手指** —— 官方传给噪域
+            // 渲染的是 blocked_touches（见 Phira-Pro `chart.rs::render_block_overlay`），
+            // 不是全部触摸。所以「谱面这一段没有噪域」或者「手指按在噪域之外」时
+            // 不会有任何触摸特效，只有真正被噪域吃掉的手指才有。
+            CollectTouches(fingers, count);
+
             IsTouchingAnyBlock = _blockedFingers.Count > 0;
             UpdateLowPassFilterState(IsTouchingAnyBlock);
+
+            _lastBlockingFrame = Time.frameCount;
         }
 
         /// <summary>
-        /// 把世界坐标的手指位置换成屏幕 UV（原点左下，0..1）。
+        /// 把**被阻断的**手指的世界坐标换成屏幕 UV（原点左下，0..1）。
         /// 官方 TouchMask 就是吃这套坐标，着色器里的 _TouchPos 也是。
         /// </summary>
         private void CollectTouches(Finger[] fingers, int count)
@@ -354,6 +385,7 @@ namespace MainCore
             for (int i = 0; i < count && i < fingers.Length; i++)
             {
                 if (fingers[i] == null) continue;
+                if (!_blockedFingers.Contains(i)) continue;
 
                 Vector2 world = fingers[i].newPosition;
                 Vector2 uv;

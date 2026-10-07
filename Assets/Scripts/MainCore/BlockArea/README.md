@@ -57,6 +57,14 @@ Phigros 4.0 第九章引入的「红区」机制：谱面里会出现一块（�
    反编译结果的「逐行直译」，改它的时候很容易顺手把 `inversesqrt` 这类
    GLSL 专有名字带进来 —— **HLSL 没有 `inversesqrt`，对应的是 `rsqrt`**。
    这一处曾经让整个红区变成洋红（见下）。
+7. **hover 的触摸源是「被阻断的手指」，不是全部触摸**。官方传给噪域渲染的是
+   `blocked_touches` —— 只有被奇偶规则吃掉的手指才会进这个列表
+   （Phira-Pro `chart.rs::render_block_overlay` 传给 `draw_zones_with_touches`
+   的就是它）。所以**谱面这一段没有噪域、或者手指按在噪域之外时，不应该有任何
+   触摸特效**。早期实现把全部手指都喂了进去，表现为「屏幕随便一点就冒出噪域特效」。
+   因此 `BlockAreaManager.UpdateBlocking` 的顺序是：
+   `EnsureUpdated`（解算几何）→ 算 `_blockedFingers` → `CollectTouches`（只收这些），
+   而绘制收口在 `LateUpdate`，保证用的就是本帧的断触结果。
 
 ## 出问题时的第一反应：整屏洋红
 
