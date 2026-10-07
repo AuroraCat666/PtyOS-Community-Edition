@@ -12,6 +12,69 @@ namespace MainCore.Data
         public int numOfNotes = 0;
         public List<judgeLine> judgeLineList = new List<judgeLine>();
         public int maxZOrder = 0;
+
+        /// <summary>
+        /// 红区（BlockArea）。Phigros 4.0 的私有扩展字段，与 judgeLineList 平级。
+        /// 时间单位是秒（float），不是 judgeLine 事件用的整数 T。
+        /// </summary>
+        public List<BlockArea> blockAreaList = new List<BlockArea>();
+
+        public bool HasBlockArea => blockAreaList is { Count: > 0 };
+    }
+
+    // ===== 红区（BlockArea）数据结构 =====
+    // 逆向自 Phigros 4.0.1 libil2cpp.so，规格见
+    // https://docs.chcat1320.top/knowladge/phigros/data.html
+
+    /// <summary>一块红区。矩形由两个屏幕百分比坐标定义，坐标原点在左下角。</summary>
+    [System.Serializable]
+    public class BlockArea
+    {
+        public Vector2 topRightPercentage;
+        public Vector2 bottomLeftPercentage;
+
+        public float appearTime;     // 出现
+        public float enableTime;     // 生效（可触摸）
+        public float disableTime;    // 失效
+        public float disappearTime;  // 消失
+
+        /// <summary>减块：视觉上从画面中扣除，且触摸区内缩（更难按）。</summary>
+        public bool isSubtract;
+
+        public List<BlockRotateEvent> rotateEvents = new List<BlockRotateEvent>();
+        public List<BlockMoveEvent> moveEvents = new List<BlockMoveEvent>();
+        public List<BlockScaleEvent> scaleEvents = new List<BlockScaleEvent>();
+
+        public bool IsActive(float t) => enableTime <= t && disableTime > t;
+        public bool IsVisible(float t) => appearTime <= t && disappearTime > t;
+    }
+
+    [System.Serializable]
+    public class BlockRotateEvent
+    {
+        public Vector2 anchor;
+        public float time;
+        public int easeType;
+        public float rotation; // 度，绝对值
+    }
+
+    [System.Serializable]
+    public class BlockMoveEvent
+    {
+        public Vector2 endPosition; // 屏幕百分比，块中心的目标位置
+        public float time;
+        public int easeTypeX;
+        public int easeTypeY;
+    }
+
+    [System.Serializable]
+    public class BlockScaleEvent
+    {
+        public Vector2 anchor;
+        public float time;
+        public int easeTypeX;
+        public int easeTypeY;
+        public Vector2 scale; // 倍率
     }
 
     [System.Serializable]

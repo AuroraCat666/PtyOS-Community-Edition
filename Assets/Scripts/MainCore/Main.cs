@@ -203,6 +203,11 @@ namespace MainCore
             //Init play
             PrepareMultipleMode();
             InitChartPlay();
+
+            //Init 红区（BlockArea）—— Phigros 4.0 第九章机制
+            //必须在 _audioSource 建好之后，按住块时要给它挂低通滤波。
+            var blockArea = BlockAreaManager.Create(ChartLoader.Chart, instantiateTransform);
+            blockArea?.AttachMusicSource(_audioSource);
         }
 
         private void Start()

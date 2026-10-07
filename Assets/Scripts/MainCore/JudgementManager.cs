@@ -131,6 +131,15 @@ namespace MainCore
             UpdateKeyBoardInput(); //Keyboard(?) support.
 #endif
 
+            // 红区断触：先把落在 Active 块上的手指标记出来，再做音符判定。
+            // 顺序不能反 —— 被块吃掉的手指必须在本帧判定之前就被排除。
+            var blockArea = BlockAreaManager.Instance;
+            if (blockArea != null && blockArea.HasBlocks)
+            {
+                blockArea.UpdateBlocking(fingers, numOfFingers,
+                    Main.Instance != null ? Main.Instance.progressManager.NowTime : 0f);
+            }
+
             UpdateJudge();
         }
 
@@ -202,9 +211,14 @@ namespace MainCore
             }
 
             float pTime = Main.Instance.progressManager.NowTime;
+            var blockArea = BlockAreaManager.Instance;
 
             for (int i = 0; i < numOfFingers; i++)
             {
+                // 红区断触：该手指按在块上，触摸被块消费，不参与任何音符判定。
+                if (blockArea != null && blockArea.IsBlocked(i))
+                    continue;
+
                 var judgedFlick = false;
                 var judgedFlickTime = 9999f;
                 notesInJudge.Clear();
