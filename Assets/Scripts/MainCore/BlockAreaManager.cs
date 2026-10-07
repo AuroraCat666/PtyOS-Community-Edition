@@ -14,7 +14,8 @@ namespace MainCore
     ///   ProcessBlockedTouches()  → 收集被阻断的触摸位置，送着色器
     ///   UpdateLowPassFilterState → 按住任意 Active 块时压低 BGM
     ///
-    /// 本类负责创建块、每帧驱动变换、对外提供命中查询与断触状态。
+    /// 本类负责创建块、每帧驱动变换与噪域绘制、对外提供命中查询与断触状态。
+    /// 具体的 mask 光栅化与全屏合成在 <see cref="BlockAreaNoiseField"/> 里。
     /// </summary>
     public class BlockAreaManager : MonoBehaviour
     {
@@ -34,8 +35,10 @@ namespace MainCore
         private readonly List<BlockAreaController> _blocks = new List<BlockAreaController>();
         private readonly HashSet<int> _blockedFingers = new HashSet<int>();
 
-        /// <summary>全屏层相对游戏区的外扩，避免边缘留出 1 像素缝。</summary>
-        private const float FullscreenMargin = 1.05f;
+        /// <summary>每帧收集的 chart space 几何，交给噪域绘制层。</summary>
+        private BlockAreaZone[] _zoneBuffer;
+        /// <summary>每帧的触摸点（屏幕 UV），驱动 hover 与触摸 SDF 高光。</summary>
+        private readonly List<BlockTouch> _touchBuffer = new List<BlockTouch>(16);
 
         /// <summary>
         /// 游戏内容（判定线 / 音符 / 红区）所在的世界 z 平面 —— 硬事实，不是拍脑袋取的。
@@ -56,16 +59,12 @@ namespace MainCore
         private float _screenWidth;
         private float _screenHeight;
         private float _blockLocalZ;
-        private float _syncedWidth = -1f;
-        private float _syncedHeight = -1f;
 
         /// <summary>块的父物体（Game Root）。每帧要把世界 z 换算成它的局部 z。</summary>
         private Transform _parent;
 
-        /// <summary>stencil 清零层（全屏，bit0 = 0）。</summary>
-        private SpriteRenderer _stencilClearRenderer;
-        /// <summary>显示层（全屏，bit0 == 1 处画红）。</summary>
-        private SpriteRenderer _fillRenderer;
+        /// <summary>噪域全屏绘制层。</summary>
+        private BlockAreaNoiseField _field;
 
         private AudioSource _musicSource;
         private AudioLowPassFilter _lowPass;
@@ -83,6 +82,10 @@ namespace MainCore
         public static BlockAreaManager Create(Chart chart, Transform parent)
         {
             if (chart == null || !chart.HasBlockArea) return null;
+
+            // 纹理与着色器的加载缓存。放在这里而不是 Main，是为了保证
+            // 「有红区才加载」—— 没有第九章谱面时不白白吃掉四张纹理。
+            BlockAreaAssets.EnsureInitialized();
 
             var go = new GameObject("[BlockArea]");
             var manager = go.AddComponent<BlockAreaManager>();
@@ -107,126 +110,18 @@ namespace MainCore
                 manager._blocks.Add(controller);
             }
 
-            manager.CreateFullscreenLayers(parent, blockLocalZ);
-            manager.SyncFullscreenLayers();
+            manager._zoneBuffer = new BlockAreaZone[Mathf.Max(manager._blocks.Count, 1)];
+
+            manager._field = new BlockAreaNoiseField();
+            manager._field.Setup(parent, blockLocalZ);
+            manager._field.SetField(manager._screenWidth, manager._screenHeight, GlobalSetting.Aspect);
+
             manager.LogSchedule();
 
             return manager;
         }
 
-        // ============ 全屏层 ============
-        //
-        // 红区的形状是「普通块 XOR 减块」，没办法用一串矩形直接画出来
-        // （减块盖住普通块时，普通块自己矩形里有一块要被挖空）。
-        // 所以走 stencil：
-        //   1. StencilClear  全屏，把 bit0 抹成 0
-        //   2. 每个 Active 块写 bit0（普通块 Replace 1 / 减块 Invert）
-        //   3. Fill          全屏，只在 bit0 == 1 处画红
-        // 三步都在同一个 sorting layer 内、靠 sortingOrder 定先后。
-
-        private void CreateFullscreenLayers(Transform parent, float localZ)
-        {
-            _stencilClearRenderer = CreateFullscreenRenderer(
-                "BlockAreaStencilClear", parent, localZ,
-                BlockAreaMaterials.StencilClear,
-                BlockAreaMaterials.OrderStencilClear,
-                Color.white);
-
-            _fillRenderer = CreateFullscreenRenderer(
-                "BlockAreaFill", parent, localZ,
-                BlockAreaMaterials.Fill,
-                BlockAreaMaterials.OrderFill,
-                BlockAreaMaterials.ActiveFill);
-
-            if (!BlockAreaMaterials.Ready)
-            {
-                // 着色器没取到就整条 stencil 管线都不可用：
-                // 关掉两个全屏层，让每一块退回「直接画淡红」，
-                // 至少红区还能看见，而不是整块消失。
-                // 注意这里只是「当前」状态，真正的开关每帧由
-                // SyncFullscreenLayersEnabled 同步，避免创建时判一次就定终身。
-                if (_stencilClearRenderer != null) _stencilClearRenderer.enabled = false;
-                if (_fillRenderer != null) _fillRenderer.enabled = false;
-            }
-        }
-
-        /// <summary>
-        /// 每帧同步全屏 stencil 层的开关。
-        /// 原来只在 Create 时判一次 BlockAreaMaterials.Ready，一旦那一刻取不到
-        /// 着色器，全屏层就被永久关掉；但块自己的渲染器是每帧重新判断的，
-        /// 于是会出现「块已经切成只写 stencil 的材质（ColorMask 0，本来就看不见），
-        /// 全屏显示层却还是关的」—— 屏幕上一个像素都不亮。
-        /// </summary>
-        private void SyncFullscreenLayersEnabled()
-        {
-            bool ready = BlockAreaMaterials.Ready;
-            if (_stencilClearRenderer != null && _stencilClearRenderer.enabled != ready)
-                _stencilClearRenderer.enabled = ready;
-            if (_fillRenderer != null && _fillRenderer.enabled != ready)
-                _fillRenderer.enabled = ready;
-        }
-
-        private static SpriteRenderer CreateFullscreenRenderer(string name, Transform parent, float localZ,
-            Material material, int order, Color color)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = new Vector3(0f, 0f, localZ);
-
-            var renderer = go.AddComponent<SpriteRenderer>();
-            renderer.sprite = BlockAreaController.UnitSprite;
-            renderer.drawMode = SpriteDrawMode.Simple;
-            renderer.sharedMaterial = material != null ? material : renderer.sharedMaterial;
-
-            string layer = ResolveTopSortingLayer();
-            if (!string.IsNullOrEmpty(layer)) renderer.sortingLayerName = layer;
-
-            renderer.sortingOrder = order;
-            renderer.color = color;
-            return renderer;
-        }
-
-        /// <summary>把两个全屏层铺满整个游戏区。分辨率变化时重算。</summary>
-        private void SyncFullscreenLayers()
-        {
-            if (Mathf.Approximately(_syncedWidth, _screenWidth) &&
-                Mathf.Approximately(_syncedHeight, _screenHeight))
-                return;
-
-            _syncedWidth = _screenWidth;
-            _syncedHeight = _screenHeight;
-
-            var scale = new Vector3(_screenWidth * FullscreenMargin, _screenHeight * FullscreenMargin, 1f);
-            var position = new Vector3(0f, 0f, _blockLocalZ);
-
-            if (_stencilClearRenderer != null)
-            {
-                _stencilClearRenderer.transform.localScale = scale;
-                _stencilClearRenderer.transform.localPosition = position;
-            }
-
-            if (_fillRenderer != null)
-            {
-                _fillRenderer.transform.localScale = scale;
-                _fillRenderer.transform.localPosition = position;
-            }
-        }
-
-        /// <summary>取项目里最靠上的排序层（AboveNotes 优先），红区要盖住音符。</summary>
-        private static string ResolveTopSortingLayer()
-        {
-            var layers = SortingLayer.layers;
-            if (layers == null || layers.Length == 0) return null;
-
-            foreach (var l in layers)
-                if (l.name == "AboveNotes") return l.name;
-
-            SortingLayer best = layers[0];
-            foreach (var l in layers)
-                if (l.value > best.value) best = l;
-
-            return best.name;
-        }
+        // ============ 游戏区尺寸 / z 平面 ============
 
         /// <summary>
         /// 求「游戏内容所在的世界 z 平面」。
@@ -234,7 +129,7 @@ namespace MainCore
         /// 主源是判定线的实际平面（音符是它的子物体，跟着它走）；
         /// 但必须用相机视锥验一下：Create 发生在谱面刚加载完、判定线还没跑过
         /// 第一帧的时候，那时 JudgeLineTopTransform 还停在预制体的 z 上，
-        /// 直接采信会把块也放到相机平面上（就是这次「红区不显示」的原因）。
+        /// 直接采信会把块也放到相机平面上（就是「红区不显示」的原因）。
         /// </summary>
         private static float ResolveWorldZ()
         {
@@ -308,17 +203,10 @@ namespace MainCore
                 : $"相机 世界z={cam.transform.position.z:F1} near={cam.nearClipPlane:F2} " +
                   $"far={cam.farClipPlane:F0} 正交={cam.orthographic}";
 
-            string fillInfo = _fillRenderer == null
-                ? "无显示层"
-                : $"显示层 世界z={_fillRenderer.transform.position.z:F1} " +
-                  $"尺寸={_fillRenderer.transform.localScale.x:F1}x{_fillRenderer.transform.localScale.y:F1} " +
-                  $"材质={(_fillRenderer.sharedMaterial != null ? _fillRenderer.sharedMaterial.shader.name : "无")}";
-
             Debug.Log($"[BlockArea] 共 {_blocks.Count} 块（普通 {normal} / 减块 {subtract}），" +
                       $"第一块出现于 {first}，块局部 z={_blockLocalZ:F1}（世界 z={WorldZOf(_blockLocalZ):F1}），" +
                       $"游戏区 {_screenWidth:F2}x{_screenHeight:F2}，{camInfo}，" +
-                      $"stencil 管线={(BlockAreaMaterials.Ready ? "就绪" : "着色器缺失，已退化为矩形绘制")}，" +
-                      fillInfo);
+                      $"噪域渲染={(BlockAreaAssets.Ready ? "就绪" : "资源缺失，不会绘制")}");
         }
 
         private void Awake()
@@ -359,6 +247,8 @@ namespace MainCore
         {
             if (Instance == this) Instance = null;
             if (_sweep != null) StopCoroutine(_sweep);
+            if (_field != null) _field.Dispose();
+            _field = null;
         }
 
         // ============ 每帧驱动 ============
@@ -394,19 +284,32 @@ namespace MainCore
             {
                 _blockLocalZ = localZ;
                 for (int i = 0; i < _blocks.Count; i++) _blocks[i].SetLocalZ(localZ);
-                // 全屏层也要跟着挪，强制重铺一次
-                _syncedWidth = -1f;
-                _syncedHeight = -1f;
             }
 
-            SyncFullscreenLayers();
-            SyncFullscreenLayersEnabled();
-
+            // ---- 1. 解算每块的 chart space 几何 ----
+            EnsureZoneBuffer();
+            int count = 0;
             for (int i = 0; i < _blocks.Count; i++)
             {
-                _blocks[i].SetScreenSize(_screenWidth, _screenHeight);
-                _blocks[i].UpdateBlock(now);
+                var block = _blocks[i];
+                block.SetScreenSize(_screenWidth, _screenHeight);
+                block.UpdateBlock(now);
+                if (block.Zone.Valid) _zoneBuffer[count++] = block.Zone;
             }
+
+            // ---- 2. 噪域绘制 ----
+            if (_field != null)
+            {
+                _field.SetField(_screenWidth, _screenHeight, GlobalSetting.Aspect);
+                _field.SetTouches(_touchBuffer);
+                _field.Render(_zoneBuffer, count, now, _blockLocalZ);
+            }
+        }
+
+        private void EnsureZoneBuffer()
+        {
+            if (_zoneBuffer == null || _zoneBuffer.Length < _blocks.Count)
+                _zoneBuffer = new BlockAreaZone[Mathf.Max(_blocks.Count, 1)];
         }
 
         // ============ 断触 ============
@@ -417,6 +320,10 @@ namespace MainCore
         /// </summary>
         public void UpdateBlocking(Finger[] fingers, int count, float now)
         {
+            // 先把本帧手指位置（屏幕 UV）喂给噪域绘制层，再驱动本帧的重绘 ——
+            // 这样 hover 光晕跟手指是同一帧的。
+            CollectTouches(fingers, count);
+
             EnsureUpdated(now);
 
             _blockedFingers.Clear();
@@ -429,6 +336,44 @@ namespace MainCore
 
             IsTouchingAnyBlock = _blockedFingers.Count > 0;
             UpdateLowPassFilterState(IsTouchingAnyBlock);
+        }
+
+        /// <summary>
+        /// 把世界坐标的手指位置换成屏幕 UV（原点左下，0..1）。
+        /// 官方 TouchMask 就是吃这套坐标，着色器里的 _TouchPos 也是。
+        /// </summary>
+        private void CollectTouches(Finger[] fingers, int count)
+        {
+            _touchBuffer.Clear();
+            if (fingers == null) return;
+
+            var cam = Camera.main;
+            float invW = 1f / Mathf.Max(Screen.width, 1);
+            float invH = 1f / Mathf.Max(Screen.height, 1);
+
+            for (int i = 0; i < count && i < fingers.Length; i++)
+            {
+                if (fingers[i] == null) continue;
+
+                Vector2 world = fingers[i].newPosition;
+                Vector2 uv;
+
+                if (cam != null)
+                {
+                    var sp = cam.WorldToScreenPoint(new Vector3(world.x, world.y, ContentWorldZ));
+                    uv = new Vector2(sp.x * invW, sp.y * invH);
+                }
+                else if (_screenWidth > 0f && _screenHeight > 0f)
+                {
+                    uv = new Vector2(world.x / _screenWidth + 0.5f, world.y / _screenHeight + 0.5f);
+                }
+                else
+                {
+                    continue;
+                }
+
+                _touchBuffer.Add(new BlockTouch { Id = i, ScreenUV = uv });
+            }
         }
 
         /// <summary>该手指是否被红区阻断（本帧）。</summary>
@@ -452,9 +397,8 @@ namespace MainCore
         /// Ametrine 谱面前半段正是后者：块 0 是一条 20% 宽 × 200% 高的旋转竖带（减块），
         /// 块 1~21 都是落在带里的普通小块 —— 它们是可操作窗口。
         ///
-        /// ⚠️ 上一版「减块直接跳过」正好把语义做反了：
-        /// 竖带不断触、21 个窗口反而全断触。用真实谱面网格采样对比过：
-        /// 66 秒时旧实现 17.2% 断触、正确实现 75.5%。
+        /// ⚠️ 注意：视觉上是另一套语义（<c>subtract_enabled</c> 的 0.09..0.12 阈值窗口），
+        /// 官方把「画出来的地方」和「手指被拦住的地方」有意分开了。
         /// </summary>
         public bool IsBlockedAt(Vector2 worldPosition)
         {

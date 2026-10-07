@@ -5,12 +5,22 @@ using UnityEngine;
 namespace MainCore
 {
     /// <summary>
-    /// 单块红区的运行时行为 —— 等价于官方 PreviewBlockControl
+    /// 单块红区的运行时解算 —— 等价于官方 PreviewBlockControl 的位姿部分
     /// （逆向自 Phigros 4.0.1 libil2cpp.so，见 code/PreviewBlockControl.decompiled.cs）。
     ///
-    /// 职责：每帧按 nowTime 重算变换（缩放 → 旋转 → 移动），并对外提供命中测试。
+    /// 职责：
+    ///   1. 每帧按 nowTime 重算变换（缩放 → 旋转 → 移动），产出 chart space 的
+    ///      <see cref="Zone"/> 交给噪域绘制层；
+    ///   2. 对外提供命中测试（判定层「断触」要用）。
+    ///
     /// 由 <see cref="BlockAreaManager"/> 统一驱动，自身不使用 Update，以保证
     /// 「先更新块变换、再判定触摸」的顺序。
+    ///
+    /// 视觉不再由本类负责 —— 红区形状是「普通块 XOR 减块」，一串矩形画不出来，
+    /// 现在由 <see cref="BlockAreaMaskBuilder"/> 在 CPU 上光栅化成 mask，
+    /// 再由 BlockAreaActive / BlockAreaDisabled 两个全屏 Pass 合成。
+    /// 本类仍然把结果写进 Transform，因为 Contains 的命中测试复用它
+    /// （用 lossyScale 检查退化、用 InverseTransformPoint 做逆变换）。
     /// </summary>
     public class BlockAreaController : MonoBehaviour
     {
@@ -19,16 +29,16 @@ namespace MainCore
         /// <summary>在谱面 blockAreaList 中的下标，仅用于日志。</summary>
         public int Index { get; set; }
 
-        private SpriteRenderer _renderer;
-        /// <summary>SpriteRenderer 自带的默认材质（Sprites/Default），预警期要切回它。</summary>
-        private Material _previewMaterial;
+        /// <summary>本帧解算出的 chart space 几何与相位。调用 <see cref="UpdateBlock"/> 后有效。</summary>
+        public BlockAreaZone Zone { get; private set; }
+
         private float _screenWidth;
         private float _screenHeight;
         private float _localZ;
         private bool _loggedFirstVisible;
 
         // 官方调参。取值来自 Phira-Pro（prpr/src/core/block.rs）对官方
-        // JudgeControl 常量的交叉标注，与上一版凭印象写的 0.03 不同：
+        // JudgeControl 常量的交叉标注：
         //   maxBlockTouchInsetLocal          = 0.05 → 乘屏幕高，得到世界空间内缩量
         //     （在 BlockAreaManager.TouchInsetWorld() 里换算）
         //   blockTouchInsetScreenHeightRatio = 0.25 → 局部空间内缩量的上限（本文件用）
@@ -36,27 +46,6 @@ namespace MainCore
         private const float Deg2Rad = 0.017453292f;
 
         private static readonly Vector2 Half = new Vector2(0.5f, 0.5f);
-
-        private static Sprite _unitSprite;
-
-        /// <summary>单位 quad：1×1 白色贴图，pixelsPerUnit = 1，使 localScale 直接等于世界尺寸。</summary>
-        public static Sprite UnitSprite
-        {
-            get
-            {
-                if (_unitSprite != null) return _unitSprite;
-                var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false)
-                {
-                    wrapMode = TextureWrapMode.Clamp,
-                    filterMode = FilterMode.Point
-                };
-                tex.SetPixel(0, 0, Color.white);
-                tex.Apply();
-                _unitSprite = Sprite.Create(tex, new Rect(0, 0, 1, 1), Half, 1f);
-                _unitSprite.name = "BlockUnitQuad";
-                return _unitSprite;
-            }
-        }
 
         /// <summary>块所在的局部 z（父物体为 Game Root）。等于判定线/音符所在的平面。</summary>
         public float LocalZ => _localZ;
@@ -68,86 +57,11 @@ namespace MainCore
             _screenHeight = screenHeight;
             _localZ = localZ;
 
-            _renderer = gameObject.AddComponent<SpriteRenderer>();
-            _renderer.sprite = UnitSprite;
-            _renderer.drawMode = SpriteDrawMode.Simple;
-            // 红区要盖在判定线和音符之上。音符用的是 "Notes" 排序层
-            // （比 Default 高），只调 sortingOrder 压不住，必须换到最上面的
-            // "AboveNotes" 层，否则块会被音符盖住、看起来像「没显示」。
-            var topLayer = ResolveTopSortingLayer();
-            if (!string.IsNullOrEmpty(topLayer)) _renderer.sortingLayerName = topLayer;
-
-            // 记下 SpriteRenderer 自带的材质，预警期／着色器缺失时要切回它。
-            _previewMaterial = _renderer.sharedMaterial;
-
-            // 先隐藏。第一帧 UpdateBlock 算出位姿后才会显示 ——
-            // 否则会先在屏幕中心闪一个 1x1 的白块。
-            _renderer.enabled = false;
-            _renderer.sortingOrder = BlockAreaMaterials.OrderPreview;
-            _renderer.color = Color.clear;
-
             // worldPositionStays = false：块的局部坐标由我们完全接管，
             // z 用调用方算好的 localZ（见 BlockAreaManager.Create 的说明）。
             transform.SetParent(parent, false);
             transform.localScale = Vector3.zero;
             transform.localPosition = new Vector3(0f, 0f, _localZ);
-        }
-
-        // ============ 渲染状态 ============
-        //
-        // 之前用 SpriteMask 实现「减块挖洞」，实际跑下来红区整段不显示 ——
-        // SpriteMask 的 custom range 语义（front/back 排序层 + 序号的边界处理）
-        // 在「只有一个层」时容易整体失效，而且它和工程里 Hold 音符自带的
-        // 遮罩会互相影响。改成 stencil 方案后不再依赖任何排序层范围判断。
-        //
-        // 分三档：
-        //   Active   参与 stencil（普通块写 bit0=1 / 减块翻转 bit0），
-        //            真正的红色由 BlockAreaManager 的全屏 Fill 层统一画出。
-        //   Ready    预警，直接画一层淡红，不参与 stencil。
-        //   Disabled 同上。
-        //
-        // 判定用的 IsActive 与这里的分支是同一个函数，所以
-        // 「画出来的地方」与「手指被拦住的地方」天然一致。
-
-        /// <summary>隐藏：直接停掉渲染器，既不画颜色也不写 stencil。</summary>
-        private void SetHidden()
-        {
-            if (_renderer.enabled) _renderer.enabled = false;
-            // 顺带把 scale 归零：让 Contains 的 lossyScale 退化检查直接失败，
-            // 即使有别的代码绕过了 IsVisible 分支也不会误判命中。
-            transform.localScale = Vector3.zero;
-            transform.localPosition = new Vector3(0f, 0f, _localZ);
-        }
-
-        private void ApplyRenderState(float now)
-        {
-            bool active = Info.IsActive(now);
-
-            if (active && BlockAreaMaterials.Ready)
-            {
-                var wantMaterial = Info.isSubtract
-                    ? BlockAreaMaterials.SubtractWriter
-                    : BlockAreaMaterials.NormalWriter;
-                if (_renderer.sharedMaterial != wantMaterial) _renderer.sharedMaterial = wantMaterial;
-
-                int order = Info.isSubtract
-                    ? BlockAreaMaterials.OrderSubtractWriter
-                    : BlockAreaMaterials.OrderNormalWriter;
-                if (_renderer.sortingOrder != order) _renderer.sortingOrder = order;
-
-                // 颜色交给全屏 Fill 层，这里只写 stencil（ColorMask 0）。
-                _renderer.color = Color.white;
-            }
-            else
-            {
-                if (_renderer.sharedMaterial != _previewMaterial)
-                    _renderer.sharedMaterial = _previewMaterial;
-                if (_renderer.sortingOrder != BlockAreaMaterials.OrderPreview)
-                    _renderer.sortingOrder = BlockAreaMaterials.OrderPreview;
-                _renderer.color = BlockAreaMaterials.PreviewFill;
-            }
-
-            if (!_renderer.enabled) _renderer.enabled = true;
         }
 
         /// <summary>
@@ -162,10 +76,9 @@ namespace MainCore
             Debug.Log($"[BlockArea] 块 #{Index}{(Info.isSubtract ? "（减块）" : string.Empty)} " +
                       $"首次可见 @{now:F2}s 中心=({pos.x:F2},{pos.y:F2}) " +
                       $"尺寸=({Mathf.Abs(size.x):F2},{Mathf.Abs(size.y):F2}) " +
-                      $"旋转={(transform.localEulerAngles.z):F1}° localZ={_localZ:F1} 世界z={transform.position.z:F1} " +
-                      $"排序层={(_renderer.sortingLayerName ?? "?")}/{_renderer.sortingOrder} " +
-                      $"材质={(_renderer.sharedMaterial != null ? _renderer.sharedMaterial.shader.name : "无")} " +
-                      $"启用={_renderer.enabled}");
+                      $"旋转={transform.localEulerAngles.z:F1}° localZ={_localZ:F1} 世界z={transform.position.z:F1} " +
+                      $"chart 中心=({Zone.Center.x:F3},{Zone.Center.y:F3}) " +
+                      $"半宽高=({Zone.Half.x:F3},{Zone.Half.y:F3}) 生效={Zone.Active} 预警={Zone.Ready}");
         }
 
         // ============ 每帧变换 ============
@@ -195,24 +108,6 @@ namespace MainCore
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
 
-        /// <summary>
-        /// 取项目里最靠上的排序层。工程里定义了 AboveNotes（最上）> Notes > BeneathNotes > Default，
-        /// 优先用 AboveNotes，找不到再退回 value 最大的层。
-        /// </summary>
-        private static string ResolveTopSortingLayer()
-        {
-            var layers = SortingLayer.layers;
-            if (layers == null || layers.Length == 0) return null;
-
-            foreach (var l in layers)
-                if (l.name == "AboveNotes") return l.name;
-
-            SortingLayer best = layers[0];
-            foreach (var l in layers)
-                if (l.value > best.value) best = l;
-            return best.name;
-        }
-
         /// <param name="now">谱面时间（秒），对应官方 progressControl.nowTime。</param>
         public void UpdateBlock(float now)
         {
@@ -220,7 +115,11 @@ namespace MainCore
 
             if (!Info.IsVisible(now))
             {
-                SetHidden();
+                // 隐藏：Transform 退化，Contains 的 lossyScale 检查直接失败，
+                // 即使有别的代码绕过 IsVisible 分支也不会误判命中。
+                transform.localScale = Vector3.zero;
+                transform.localPosition = new Vector3(0f, 0f, _localZ);
+                Zone = default;
                 return;
             }
 
@@ -253,9 +152,48 @@ namespace MainCore
             transform.localScale = new Vector3(Mathf.Abs(scaled.size.x), Mathf.Abs(scaled.size.y), 1f);
             transform.localEulerAngles = new Vector3(0f, 0f, rotated.rotation);
 
-            // 官方 anchor 恒为 (0.5, 0.5)，这里同样固定，故不需要额外锚点世界坐标。
-            ApplyRenderState(now);
+            Zone = MakeZone(pos, scaled.size, rotated.rotation, now);
             LogFirstVisible(now, pos, scaled.size);
+        }
+
+        /// <summary>
+        /// 世界空间 → chart space。
+        ///
+        /// chart space（官方 / Phira-Pro 的口径）：
+        ///   x ∈ [-1, 1]，y ∈ [-1/aspect, 1/aspect]，以游戏区中心为原点、y 向上。
+        /// 由于游戏区高 = 世界高、宽 = 高 × aspect，两个轴其实是同一个缩放：
+        ///   chart = world * 2 / screenWidth
+        /// 校验：world.x = ±screenWidth/2 → chart.x = ±1 ✓
+        ///       world.y = ±screenHeight/2 → chart.y = ±screenHeight/screenWidth = ±1/aspect ✓
+        /// </summary>
+        private BlockAreaZone MakeZone(Vector2 worldCenter, Vector2 worldSize, float rotationDeg, float now)
+        {
+            float chartScale = _screenWidth > 0f ? 2f / _screenWidth : 0f;
+
+            bool active = Info.IsActive(now);
+            // Ready：生效前 0.5 秒的预警。官方 Zone::from_area 同款判定。
+            bool ready = !active && now < Info.enableTime && now >= Info.enableTime - 0.5f;
+            // Opacity：官方 Initial DisabledBlockShow 用 0.5 秒把 SpriteMask 淡入。
+            // 只有在「未生效」且「出现时刻本身就不是生效时刻」时才需要淡入。
+            bool fadesIn = !Info.IsActive(Info.appearTime);
+            float opacity = (!active && fadesIn)
+                ? Mathf.Clamp01((now - Info.appearTime) / 0.5f)
+                : 1f;
+
+            Vector2 half = new Vector2(Mathf.Abs(worldSize.x), Mathf.Abs(worldSize.y)) * chartScale * 0.5f;
+
+            return new BlockAreaZone
+            {
+                Center = worldCenter * chartScale,
+                Half = half,
+                Angle = rotationDeg * Deg2Rad,
+                Invert = Info.isSubtract,
+                Active = active,
+                Ready = ready,
+                Opacity = opacity,
+                // 官方 Zone::from_area 在任一半轴为 0 时直接返回 None。
+                Valid = half.x > 0f && half.y > 0f,
+            };
         }
 
         // ============ 命中测试 ============
@@ -291,7 +229,6 @@ namespace MainCore
         /// 等价官方 TryGetBlockTouchHalfSize。
         /// 关键：sign = isSubtract ? +1 : -1 —— 普通块**内缩**、减块**外扩**，
         /// 两者都朝「洞」的方向偏，边界上的触摸判定才一致。
-        /// （上一版写反了：普通块外扩、减块内缩。）
         /// </summary>
         private bool TryGetTouchHalfSize(float insetWorld, out Vector2 halfSize)
         {
