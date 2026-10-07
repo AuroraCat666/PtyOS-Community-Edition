@@ -9,13 +9,13 @@ namespace MainCore.UI
     /// Phigros 风格的启动背景（EntryScene 专用）。
     ///
     /// 对标 Phigros 4.0.1 的 SplashScene（Tap to Start 画面）观感：
-    ///   · 深色近黑底
+    ///   · 底色不用纯黑：深蓝紫上下渐变；若配了背景图则盖一层图（cover 铺满）
     ///   · 一层极淡的「交叉线条」缓慢漂浮 + 自转，并整体由暗渐亮
     ///   · 少量柔光光斑缓慢呼吸（对应官方粒子用的「光斑」贴图）
     ///   · 中心区域自动避让 + 轻暗角，保证标题 / Click to start 的对比度
     ///
-    /// 全程序化生成：线条用顶点直接绘制（不需要贴图），光斑 / 暗角用程序化贴图，
-    /// 不引入任何官方美术资源；也不需要手动改场景 —— EntryScene 加载时会自动挂上。
+    /// 线条 / 光斑 / 暗角 / 渐变底全部程序化生成（不引入官方美术资源）；
+    /// 背景图从 Resources 读取，没有也能正常跑。不需要手动改场景 —— EntryScene 加载时自动挂上。
     ///
     /// 调参重点：
     ///   · 嫌背景太抢眼 → 降 <see cref="lineBrightness"/> / <see cref="glowBrightness"/>
@@ -51,6 +51,21 @@ namespace MainCore.UI
         [Tooltip("渐变底部颜色（偏紫）")]
         public Color backdropBottom = new Color(0.086f, 0.055f, 0.129f, 1f);
         [Range(0f, 1f)] public float backdropAlpha = 1f;
+
+        // ------------------------------------------------------------------ 背景图
+
+        [Header("背景图（可选：有图就盖在渐变底上，没有就只用渐变底）")]
+        [Tooltip("Resources 下的路径，不带扩展名。\n" +
+                 "例：把 PNG 放到 Assets/Resources/UI/SplashBackdrop.png 就填 UI/SplashBackdrop\n" +
+                 "留空 = 不使用背景图")]
+        public string backdropImagePath = "UI/SplashBackdrop";
+        [Tooltip("背景图整体压暗（1 = 不压暗）。压暗能让上层的 logo / 文字更清楚")]
+        [Range(0.2f, 1f)] public float backdropImageDim = 0.82f;
+        [Tooltip("背景图不透明度")]
+        [Range(0f, 1f)] public float backdropImageAlpha = 1f;
+        [Tooltip("屏幕比例和图片不一致时，等比铺满必然裁掉一部分；这里决定保住哪一边。\n" +
+                 "0.5 = 居中裁；调大 → 保留画面下半（裁掉顶部）；调小 → 保留画面上半（裁掉底部）")]
+        [Range(0f, 1f)] public float backdropImageVerticalBias = 0.5f;
 
         // ------------------------------------------------------------------ 交叉线条
 
@@ -113,7 +128,7 @@ namespace MainCore.UI
         [Tooltip("静默椭圆区半宽 / 半高（相对屏幕宽高）。落在椭圆内的元素会被压暗")]
         public Vector2 focusArea = new Vector2(0.36f, 0.30f);
         [Tooltip("椭圆内保留的亮度比例")]
-        [Range(0f, 1f)] public float focusKeep = 0.18f;
+        [Range(0f, 1f)] public float focusKeep = 0.30f;
         [Tooltip("椭圆向外的过渡带宽度（相对静默区半径）")]
         [Range(0.05f, 3f)] public float focusFeather = 0.85f;
         [Tooltip("额外叠一层中心暗角（0 = 关闭）。可进一步拉开文字与背景的对比")]
@@ -312,6 +327,26 @@ namespace MainCore.UI
                 c.a = backdropAlpha;
                 bg.color = c;
                 bg.raycastTarget = false;
+            }
+
+            // ---- 1.5 背景图（盖在渐变底之上、光斑之下）
+            //          cover 铺满：等比放大到覆盖整屏，多出来的部分溢到屏幕外，
+            //          父级没有 Mask，所以自然看不见（不会把人拉变形）。
+            var backdropSprite = LoadBackdropSprite();
+            if (backdropSprite != null)
+            {
+                var img = NewGraphic<Image>("BackdropImage", _root);
+                img.sprite = backdropSprite;
+                img.type = Image.Type.Simple;
+                img.color = new Color(backdropImageDim, backdropImageDim, backdropImageDim, backdropImageAlpha);
+                img.raycastTarget = false;
+
+                var fitter = img.gameObject.AddComponent<AspectRatioFitter>();
+                fitter.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+                fitter.aspectRatio = backdropSprite.rect.width
+                                     / Mathf.Max(backdropSprite.rect.height, 1f);
+                // EnvelopeParent 只会把图放大到「刚好覆盖」，居中摆放；纵向重心由这里的 pivot 微调
+                img.rectTransform.pivot = new Vector2(0.5f, backdropImageVerticalBias);
             }
 
             // ---- 2. 柔光光斑（画在线条下面）
@@ -564,6 +599,40 @@ namespace MainCore.UI
         private static Sprite _gradientSprite;
         private static Color _gradA, _gradB;
         private static bool _gradValid;
+        private static Sprite _backdropSprite;
+        private static string _backdropLoadedPath;
+
+        /// <summary>
+        /// 从 Resources 加载背景图。路径为空 / 找不到就返回 null，
+        /// 此时会自动退回纯渐变底（所以删掉图程序照样跑得起来）。
+        /// </summary>
+        private Sprite LoadBackdropSprite()
+        {
+            if (string.IsNullOrEmpty(backdropImagePath)) return null;
+
+            if (_backdropSprite != null && _backdropLoadedPath == backdropImagePath)
+                return _backdropSprite;
+
+            Sprite s = Resources.Load<Sprite>(backdropImagePath);
+            if (s == null)
+            {
+                // 万一贴图是按 Texture 类型导入的，这里兜底自己建一个 Sprite
+                var tex = Resources.Load<Texture2D>(backdropImagePath);
+                if (tex != null)
+                {
+                    s = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height),
+                        new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect);
+                    s.hideFlags = HideFlags.HideAndDontSave;
+                }
+            }
+
+            if (s == null)
+                Debug.LogWarning($"[SplashLineBackdrop] 找不到背景图 Resources/{backdropImagePath}，退回纯渐变底。");
+
+            _backdropSprite = s;
+            _backdropLoadedPath = backdropImagePath;
+            return s;
+        }
 
         /// <summary>程序化生成一张上下渐变贴图（上 = top，下 = bottom），用来替代纯黑底。</summary>
         private static Sprite GetGradientSprite(Color top, Color bottom)
