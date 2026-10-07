@@ -43,10 +43,14 @@ namespace MainCore.UI
 
         // ------------------------------------------------------------------ 底色
 
-        [Header("底色（关掉就叠在场景原有背景上，比如樱花 MainBG）")]
+        [Header("底色（不要纯黑：深蓝紫上下渐变）")]
+        [Tooltip("关掉就叠在场景原有背景上（比如樱花 MainBG）")]
         public bool useBackdrop = true;
-        [Range(0f, 1f)] public float backdropAlpha = 0.96f;
-        public Color backdropColor = new Color(0.020f, 0.024f, 0.036f, 1f);
+        [Tooltip("渐变顶部颜色（偏冷蓝）")]
+        public Color backdropTop = new Color(0.031f, 0.045f, 0.086f, 1f);
+        [Tooltip("渐变底部颜色（偏紫）")]
+        public Color backdropBottom = new Color(0.086f, 0.055f, 0.129f, 1f);
+        [Range(0f, 1f)] public float backdropAlpha = 1f;
 
         // ------------------------------------------------------------------ 交叉线条
 
@@ -61,8 +65,8 @@ namespace MainCore.UI
         public Vector2 lineWidth = new Vector2(2.5f, 7.0f);
         [Tooltip("线条颜色；实际亮度还要乘下面的「线条亮度」")]
         public Color lineColor = new Color(0.75f, 0.85f, 1f, 1f);
-        [Tooltip("线条最高亮度（0~1）。这是「别糊住文字」最主要的旋钮")]
-        [Range(0f, 0.5f)] public float lineBrightness = 0.27f;
+        [Tooltip("线条『最亮时』的亮度（0~1）。配合下面的脉冲，实际亮度在 linePulseDim*该值 ~ 该值 之间摆动")]
+        [Range(0f, 0.5f)] public float lineBrightness = 0.42f;
         [Tooltip("组间亮度随机抖动：0 = 全部一样亮，1 = 最暗组只有约 45% 亮度")]
         [Range(0f, 1f)] public float lineBrightnessJitter = 0.55f;
         [Tooltip("线与线之间的角度分散：0 = 全部平行，1 = 完全自由交叉")]
@@ -81,6 +85,14 @@ namespace MainCore.UI
         public Vector2 driftFrequency = new Vector2(0.015f, 0.055f);
         [Tooltip("自转速度范围（度/秒），方向随机")]
         public Vector2 spinSpeed = new Vector2(0.4f, 2.2f);
+
+        // ------------------------------------------------------------------ 亮暗脉冲
+
+        [Header("亮暗脉冲（官方观感：线条渐亮 → 再渐暗，各自错开）")]
+        [Tooltip("暗到最低时保留的亮度比例。0 = 完全熄灭，1 = 不脉冲（常亮）")]
+        [Range(0f, 1f)] public float linePulseDim = 0.10f;
+        [Tooltip("脉冲频率范围（Hz）。越小越慢，0.05 ≈ 20 秒一个来回")]
+        public Vector2 linePulseFrequency = new Vector2(0.045f, 0.16f);
 
         // ------------------------------------------------------------------ 光斑
 
@@ -155,7 +167,8 @@ namespace MainCore.UI
             public float phase;
             public bool isGlow;
             public float baseSize;      // 光斑直径
-            public float glowFreq;      // 光斑呼吸频率（Hz），线条组用不到
+            public float pulseFreq;     // 亮暗脉冲频率（Hz）
+            public float pulseDim;      // 暗到最低时保留的亮度比例
         }
 
         private void Awake() => Build();
@@ -198,10 +211,13 @@ namespace MainCore.UI
                 // ---- 亮度 = 基础 × 中心避让 × 全局渐亮
                 float a = it.baseAlpha * FocusAtten(it.rt.anchoredPosition, w, h) * global;
 
+                // ---- 亮暗脉冲：cos 包络，0 = 最暗、1 = 最亮
+                //      观感就是官方那样「慢慢亮起来，再慢慢暗下去」，各元素相位错开
+                float pulse = 0.5f - 0.5f * Mathf.Cos((now * it.pulseFreq + it.phase) * Mathf.PI * 2f);
+                a *= Mathf.Lerp(it.pulseDim, 1f, pulse);
+
                 if (it.isGlow)
                 {
-                    float pulse = 0.5f + 0.5f * Mathf.Sin((now * it.glowFreq + it.phase) * Mathf.PI * 2f);
-                    a *= Mathf.Lerp(1f - glowPulse, 1f, pulse);
                     float sz = it.baseSize * px * Mathf.Lerp(0.86f, 1.14f, pulse);
                     it.rt.sizeDelta = new Vector2(sz, sz);
                 }
@@ -285,12 +301,14 @@ namespace MainCore.UI
             float halfW = refW * 0.5f;
             float halfH = refH * 0.5f;
 
-            // ---- 1. 底色
+            // ---- 1. 底色（深蓝紫上下渐变，不用纯黑）
             if (useBackdrop)
             {
                 var bg = NewGraphic<Image>("Backdrop", _root);
                 Stretch(bg.rectTransform);
-                var c = backdropColor;
+                bg.sprite = GetGradientSprite(backdropTop, backdropBottom);
+                bg.type = Image.Type.Simple;
+                var c = Color.white;
                 c.a = backdropAlpha;
                 bg.color = c;
                 bg.raycastTarget = false;
@@ -326,7 +344,8 @@ namespace MainCore.UI
                         phase = Next(rng, 0f, 1f),
                         isGlow = true,
                         baseSize = baseSize,
-                        glowFreq = Next(rng, glowPulseFrequency.x, glowPulseFrequency.y),
+                        pulseFreq = Next(rng, glowPulseFrequency.x, glowPulseFrequency.y),
+                        pulseDim = Mathf.Clamp01(1f - glowPulse),
                     });
                 }
             }
@@ -424,6 +443,9 @@ namespace MainCore.UI
                     phase = Next(rng, 0f, 1f),
                     isGlow = false,
                     baseSize = 0f,
+                    pulseFreq = Next(rng, linePulseFrequency.x, linePulseFrequency.y),
+                    // 每组的「最暗程度」再抖一下，避免所有线一起降到同一亮度
+                    pulseDim = Mathf.Clamp01(linePulseDim * Next(rng, 0.5f, 1.3f)),
                 });
             }
 
@@ -539,6 +561,43 @@ namespace MainCore.UI
 
         private static Sprite _glowSprite;
         private static Sprite _vignetteSprite;
+        private static Sprite _gradientSprite;
+        private static Color _gradA, _gradB;
+        private static bool _gradValid;
+
+        /// <summary>程序化生成一张上下渐变贴图（上 = top，下 = bottom），用来替代纯黑底。</summary>
+        private static Sprite GetGradientSprite(Color top, Color bottom)
+        {
+            if (_gradientSprite != null && _gradValid && _gradA == top && _gradB == bottom)
+                return _gradientSprite;
+
+            const int W = 4;
+            const int H = 256;
+            var tex = new Texture2D(W, H, TextureFormat.RGBA32, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+
+            var px = new Color32[W * H];
+            for (int y = 0; y < H; y++)
+            {
+                // Unity 纹理的 y = 0 在底部
+                Color32 c = Color.Lerp(bottom, top, y / (H - 1f));
+                for (int x = 0; x < W; x++) px[y * W + x] = c;
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+
+            _gradientSprite = Sprite.Create(tex, new Rect(0, 0, W, H), new Vector2(0.5f, 0.5f), 100f,
+                (uint)SpriteMeshType.FullRect);
+            _gradientSprite.hideFlags = HideFlags.HideAndDontSave;
+            _gradA = top;
+            _gradB = bottom;
+            _gradValid = true;
+            return _gradientSprite;
+        }
 
         /// <summary>程序化柔光圆点（径向 smoothstep），对应官方的「光斑」贴图。</summary>
         private static Sprite GetGlowSprite()

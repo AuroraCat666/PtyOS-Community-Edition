@@ -193,13 +193,13 @@ namespace MainCore.UI
                     () =>
                     {
                         FadeOutBgm();
-                        SceneTransit.Instance.JumpScene("MainScene", 0);
+                        SceneTransit.Instance.JumpScene("MainScene", 1);
                     }, "确定");
             }
             else
             {
                 FadeOutBgm();
-                SceneTransit.Instance.JumpScene("MainScene", 0);
+                SceneTransit.Instance.JumpScene("MainScene", 1);
             }
         }
 
