@@ -195,7 +195,7 @@ fixed4 disabledColor(float mask, float2 disabledDisplaceUV, float2 sparkUV)
 
     u_xlat4x = _UnityTime.x * _DisabledSpeed;
     u_xlat16_1x = dot(_DisplaceDirection.xy, _DisplaceDirection.xy);
-    u_xlat16_1x = inversesqrt(u_xlat16_1x);
+    u_xlat16_1x = rsqrt(u_xlat16_1x);
     u_xlat16_1 = u_xlat16_1x.xx * _DisplaceDirection.xy;
 
     u_xlat2.xyw = u_xlat4x.xxx * u_xlat16_1.xyx;
@@ -271,7 +271,7 @@ fixed4 fullActive(v2f IN)
         float gi       = gl * _GlowIntensity;
 
         // ---- 位移方向 ----
-        float invLen = inversesqrt(dot(_DisplaceDirection.xy, _DisplaceDirection.xy));
+        float invLen = rsqrt(dot(_DisplaceDirection.xy, _DisplaceDirection.xy));
         float2 d2 = invLen.xx * _DisplaceDirection.xy;   // normalize 后的方向
         float t1 = _UnityTime.x * _DisplaceSpeed;
         float pscale = max(_BackgroundPixelScale, 1.0);
@@ -433,7 +433,7 @@ fixed4 fullActive(v2f IN)
     float3 hoverCol = float3(0, 0, 0);
     if (u_xlat48 > 9.99999975e-05)
     {
-        float invLen = inversesqrt(dot(_TouchDisplaceDirection.xy, _TouchDisplaceDirection.xy));
+        float invLen = rsqrt(dot(_TouchDisplaceDirection.xy, _TouchDisplaceDirection.xy));
         float2 td = invLen.xx * _TouchDisplaceDirection.xy;
         float tt = _UnityTime.x * _TouchDisplaceSpeed;
 
