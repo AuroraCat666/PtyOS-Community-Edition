@@ -25,6 +25,12 @@ namespace MainCore
         private const float LowPassCutoffFrequency = 1500f;
         private const float LowPassLerpDuration = 0.25f;
 
+        /// <summary>
+        /// 官方 JudgeControl.maxBlockTouchInsetLocal。
+        /// 乘屏幕高得到世界空间内缩量；局部空间的上限见 BlockAreaController。
+        /// </summary>
+        private const float TouchInsetScreenHeightRatio = 0.05f;
+
         private readonly List<BlockAreaController> _blocks = new List<BlockAreaController>();
         private readonly HashSet<int> _blockedFingers = new HashSet<int>();
 
@@ -95,26 +101,26 @@ namespace MainCore
         }
 
         /// <summary>
-        /// 打一条可对照的日志：本谱面共多少块、第一个「看得见」的块在第几秒。
-        /// 红区在谱面里很可能整段前奏都不出现（Ametrine 是 64.33 秒才第一块），
-        /// 玩家从头播会觉得「红区根本没做」，这条日志能直接排除这种误判。
+        /// 打一条可对照的日志：本谱面共多少块、第一块在第几秒出现。
+        /// 红区整段前奏都可能不出现，玩家从头播会觉得「红区根本没做」，
+        /// 这条日志能直接排除这种误判。
         /// </summary>
         private void LogSchedule()
         {
-            int visible = 0, subtract = 0;
-            float firstVisible = float.MaxValue;
+            int normal = 0, subtract = 0;
+            float firstAppear = float.MaxValue;
             foreach (var b in _blocks)
             {
                 if (b == null || b.Info == null) continue;
-                if (b.IsSubtract) { subtract++; continue; }
-                visible++;
-                if (b.Info.appearTime < firstVisible) firstVisible = b.Info.appearTime;
+                if (b.IsSubtract) subtract++;
+                else normal++;
+                if (b.Info.appearTime < firstAppear) firstAppear = b.Info.appearTime;
             }
 
-            string first = visible > 0 ? firstVisible.ToString("F2") + "s" : "无";
+            string first = _blocks.Count > 0 ? firstAppear.ToString("F2") + "s" : "无";
             float localZ = _blocks.Count > 0 && _blocks[0] != null ? _blocks[0].LocalZ : 0f;
-            Debug.Log($"[BlockArea] 共 {_blocks.Count} 块（普通 {visible} / 减块 {subtract}），" +
-                      $"第一个可见红区出现在 {first}，块所在局部 z={localZ:F1}");
+            Debug.Log($"[BlockArea] 共 {_blocks.Count} 块（普通 {normal} / 减块 {subtract}），" +
+                      $"第一块出现于 {first}，块所在局部 z={localZ:F1}");
         }
 
         private void Awake()
@@ -199,7 +205,7 @@ namespace MainCore
             for (int i = 0; i < count && i < fingers.Length; i++)
             {
                 if (fingers[i] == null) continue;
-                if (TryGetBlockingBlock(fingers[i].newPosition, out _))
+                if (IsBlockedAt(fingers[i].newPosition))
                     _blockedFingers.Add(i);
             }
 
@@ -210,43 +216,59 @@ namespace MainCore
         /// <summary>该手指是否被红区阻断（本帧）。</summary>
         public bool IsBlocked(int fingerIndex) => _blockedFingers.Contains(fingerIndex);
 
+        /// <summary>本帧的世界空间内缩量。等价官方 TryGetBlockTouchHalfSize 的输入。</summary>
+        private float TouchInsetWorld() => TouchInsetScreenHeightRatio * Mathf.Max(_screenHeight, 0f);
+
         /// <summary>
-        /// 世界坐标是否被红区阻断。等价官方 TryGetBlockingBlock。
+        /// 世界坐标是否被红区阻断。等价官方 JudgeControl.TryGetBlockingBlock —— **奇偶规则**：
         ///
-        /// 关键语义：减块（isSubtract）不阻断触摸，只影响渲染（把红区挖掉一块、
-        /// 露出底下的画面）。触摸上直接跳过减块，只统计普通块。
+        ///     被阻断 &lt;=&gt; 「落在任意普通块内」 XOR 「落在奇数个减块内」
         ///
-        /// 不这样处理会直接毁掉游戏：实测谱面的块 0 就是一个覆盖
-        /// 120% 屏宽 × 200% 屏高的减块，若让减块也参与阻断，整屏都会变成断触区。
+        /// 并且**整块矩形**与**内缩矩形**两次测试都必须成立（两套计数各算各的）。
+        /// 参考实现：Phira-Pro `prpr/src/core/block.rs::block_touch_blocked`。
         ///
-        /// 已知取舍：块 22（300% 屏全屏红区）+ 块 23（100% 屏减块）这组
-        /// 原意应是「全屏红区、中间挖出一个可操作的洞」，当前实现下洞内仍会被
-        /// 块 22 阻断。要让洞真正可操作，需要改成
-        /// 「命中普通块 && 未被任何减块覆盖」的判定，但那会让块 0 把全部
-        /// 21 个小块一并挖空。两者只能取其一，待实机对照官方行为后再定。
+        /// 这条规则同时解释了两件反直觉的事：
+        ///   * 单独一个减块是**实心断触区**（命中奇数个减块 → 阻断），不是「洞」；
+        ///   * 减块盖住普通块时，普通块变成**可操作窗口**（两者都命中 → 抵消）。
+        ///
+        /// Ametrine 谱面前半段正是后者：块 0 是一条 20% 宽 × 200% 高的旋转竖带（减块），
+        /// 块 1~21 都是落在带里的普通小块 —— 它们是可操作窗口。
+        ///
+        /// ⚠️ 上一版「减块直接跳过」正好把语义做反了：
+        /// 竖带不断触、21 个窗口反而全断触。用真实谱面网格采样对比过：
+        /// 66 秒时旧实现 17.2% 断触、正确实现 75.5%。
         /// </summary>
-        public bool TryGetBlockingBlock(Vector2 worldPosition, out BlockAreaController blockingBlock)
+        public bool IsBlockedAt(Vector2 worldPosition)
         {
             float now = CurrentTime;
+            float inset = TouchInsetWorld();
+
+            bool fullNormal = false;
+            int fullSubtract = 0;
+            bool insetNormal = false;
+            int insetSubtract = 0;
 
             for (int i = 0; i < _blocks.Count; i++)
             {
                 var block = _blocks[i];
                 if (block == null || !block.IsActive(now)) continue;
 
-                // 减块自身不阻断触摸。它是「从红区中挖掉一块」的区域，
-                // 只影响渲染（露出底下的画面），不产生断触。
-                if (block.IsSubtract) continue;
+                if (block.Contains(worldPosition, now, 0f))
+                {
+                    if (block.IsSubtract) fullSubtract++;
+                    else fullNormal = true;
+                }
 
-                if (!block.IsPositionInside(worldPosition)) continue;
-
-                // 命中即返回，与官方 TryGetBlockingBlock 一致（不取最优、只取首个）
-                blockingBlock = block;
-                return true;
+                if (block.Contains(worldPosition, now, inset))
+                {
+                    if (block.IsSubtract) insetSubtract++;
+                    else insetNormal = true;
+                }
             }
 
-            blockingBlock = null;
-            return false;
+            // 命中即返回的旧语义已废弃：现在必须扫完所有块才能得出奇偶结论。
+            return (fullNormal ? 1 : 0) != (fullSubtract & 1)
+                && (insetNormal ? 1 : 0) != (insetSubtract & 1);
         }
 
         // ============ 低通滤波 ============
