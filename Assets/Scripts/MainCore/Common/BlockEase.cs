@@ -3,17 +3,41 @@ using UnityEngine;
 namespace MainCore.Common
 {
     /// <summary>
-    /// 红区缓动查表 —— 等价于官方 GetEase（逆向自 Phigros 4.0.1 libil2cpp.so）。
+    /// 红区缓动查表 —— 等价于官方 block easing 枚举（Phigros 4.0 噪域）。
     ///
-    /// 官方在启动时构造 15 张 101 点的表，运行时只查表 + 线性插值，没有任何超越函数调用。
-    /// 这里完整照抄构造过程，以保证与原版逐点一致。
+    /// 官方在启动时构造 15 张 101 点的表，运行时只查表 + 线性插值。
+    /// 枚举语义（0..=14）：
+    ///   0        Linear
+    ///   1..=12   In / Out / InOut 的 Quad / Cubic / Quart / Quint
+    ///            power = (type - 1) / 3 + 2      （Quad=2, Cubic=3, Quart=4, Quint=5）
+    ///            m     = (type - 1) % 3
+    ///              m=0 → In    : u^power
+    ///              m=1 → Out   : 1 - (1-u)^power
+    ///              m=2 → InOut : u < 0.5 ? 2^(power-1)*u^power
+    ///                                     : 1 - (2-2u)^power / 2
+    ///   13       HoldStart（恒 0）
+    ///   14       JumpToEnd（恒 1）
     ///
-    /// 三处必须照抄的行为（做错会让谱面完全错乱）：
-    ///   1. easeType 3 / 6 / 9 / 13 是「死表」——构造循环从未写入，恒为 0。
-    ///      语义是 Lerp(cur, next, 0) == cur，即「保持当前值，到下一个事件才跳变」的阶梯。
-    ///      这不是 bug，是谱面的正常写法（实测本仓库谱面用了约 148 次）。
-    ///   2. easeType 14 恒为 1，等价于瞬间跳到终点。
-    ///   3. easeType 12 是分段降采样，中间 50..57 为未写入的 0，存在真实跳变。
+    /// 即：1=InQuad 2=OutQuad 3=InOutQuad 4=InCubic 5=OutCubic 6=InOutCubic
+    ///     7=InQuart 8=OutQuart 9=InOutQuart 10=InQuint 11=OutQuint 12=InOutQuint
+    ///
+    /// ⚠️ 别再把 3/6/9/12 当「死表」
+    /// ------------------------------------------------------------------
+    /// 曾经有一版实现把 3/6/9 当作「构造循环没写到的死表」恒 0、把 12 当作
+    /// 「隔点降采样、中间 50..57 留 0」，理由是这么推的：循环 idx ∈ {1,4,7,10}
+    /// 步长 3、每轮只写 E[idx] 和 E[idx+1]，所以 3/6/9/12 永远写不到。
+    ///
+    /// 这个推导有两个硬伤：
+    ///   1. `n = idx / 3 + 2` 只在 idx ∈ {1,4,7,10} 时才是整数（2/3/4/5）。
+    ///      这恰恰说明每轮写的是 **In、Out、InOut 三条**（idx、idx+1、idx+2），
+    ///      于是 3/6/9/12 都被写成了 InOut 曲线 —— 与"InOut 是分段函数"
+    ///      这个已知事实吻合（旧实现自己也给 12 写了 40 行分段代码，自相矛盾）。
+    ///   2. 实测反证：ハテ AT 的块 20 有一串 `moveEvents` 把 x 在 0.25 ↔ 0.025
+    ///      之间往复摆 5 个来回，`easeTypeX` 全是 3。若 3 恒 0，这些事件完全不生效、
+    ///      方块会卡死在原地 —— 与官方实机（方块平滑来回摆）不符。
+    ///
+    /// 症状对照：用错时表现为「噪域在变换时不再平滑移动，而是一格格跳 / 卡成
+    /// 一堆互不相连的竖矩形」。
     /// </summary>
     public static class BlockEase
     {
@@ -30,9 +54,9 @@ namespace MainCore.Common
             if ((uint)type >= TypeCount)
             {
                 // 官方行为是抛 IndexOutOfRangeException。社区版要能跑各种自制谱，
-                // 这里降级为钳制并告警，避免一张谱面直接让游戏崩掉。
-                Debug.LogWarning($"[BlockEase] easeType {type} 越界（应 0~14），已钳制");
-                type = Mathf.Clamp(type, 0, TypeCount - 1);
+                // 这里降级为 Linear，避免一张谱面直接让游戏崩掉。
+                Debug.LogWarning($"[BlockEase] easeType {type} 越界（应 0~14），按 Linear 处理");
+                type = 0;
             }
 
             // 官方在 NaN 时经 ARM64 饱和转换得到 INT_MIN，最终走 i < 0 分支返回 table[0]。
@@ -52,57 +76,41 @@ namespace MainCore.Common
         {
             tables = new float[TypeCount][];
             for (int t = 0; t < TypeCount; t++)
-                tables[t] = new float[SampleCount]; // 零初始化，这是 3/6/9/13 成为死表的前提
+                tables[t] = new float[SampleCount];
 
-            // easeType 0：线性
             for (int i = 0; i < SampleCount; i++)
-                tables[0][i] = i / 100f;
-
-            // 主循环：idx 取 1, 4, 7, 10（步进 3），指数 n = idx / 3 + 2
-            // idx=1→n=2（二次）  idx=4→n=3（三次）  idx=7→n=4（四次）  idx=10→n=5（五次）
-            for (int idx = 1; idx <= 10; idx += 3)
             {
-                int n = idx / 3 + 2;
-                var inCurve = tables[idx];
-                var outCurve = tables[idx + 1];
+                float u = i / 100f;
+                tables[0][i] = u;   // Linear
+                tables[13][i] = 0f; // HoldStart
+                tables[14][i] = 1f; // JumpToEnd
+            }
+
+            // 1..12：In / Out / InOut × Quad / Cubic / Quart / Quint
+            for (int t = 1; t <= 12; t++)
+            {
+                int power = (t - 1) / 3 + 2;
+                int m = (t - 1) % 3;
+                float[] row = tables[t];
                 for (int i = 0; i < SampleCount; i++)
                 {
                     float u = i / 100f;
-                    inCurve[i] = Mathf.Pow(u, n);
-                    outCurve[i] = 1f - Mathf.Pow(1f - u, n);
+                    switch (m)
+                    {
+                        case 0:
+                            row[i] = Mathf.Pow(u, power);
+                            break;
+                        case 1:
+                            row[i] = 1f - Mathf.Pow(1f - u, power);
+                            break;
+                        default:
+                            row[i] = u < 0.5f
+                                ? (1 << (power - 1)) * Mathf.Pow(u, power)
+                                : 1f - Mathf.Pow(2f - 2f * u, power) * 0.5f;
+                            break;
+                    }
                 }
             }
-
-            // easeType 12：两段隔点降采样
-            //   pass1  E[12][j]      = E[10][8 + 2j] * 0.5            (j = 0…49)
-            //   pass2  E[12][58 + j] = E[11][8 + 2j] * 0.5 + 0.5      (j = 0…41，写满到 99)
-            // 结果 E[12][50..57] 未被任何语句写入，保持 0 —— 这是真实的跳变，不是笔误。
-            var e10 = tables[10];
-            var e11 = tables[11];
-            var e12 = tables[12];
-
-            for (int j = 0; j <= 49; j++)
-            {
-                int src = 8 + 2 * j;
-                // 源索引 102/104/106 在原版越界读到堆垃圾，无法复现；
-                // 这里按公式外推，保证曲线连续可预测。
-                e12[j] = (src < SampleCount ? e10[src] : Mathf.Pow(src / 100f, 5f)) * 0.5f;
-            }
-
-            for (int j = 0; j <= 49; j++)
-            {
-                int dst = 58 + j;
-                if (dst >= SampleCount - 1) break; // 末点单独归一，不要覆盖
-                int src = 8 + 2 * j;
-                e12[dst] = (src < SampleCount ? e11[src] : 1f - Mathf.Pow(1f - src / 100f, 5f)) * 0.5f + 0.5f;
-            }
-
-            e12[100] = 1f;
-
-            // easeType 13：恒为 0（已由零初始化保证）
-            // easeType 14：恒为 1
-            for (int i = 0; i < SampleCount; i++)
-                tables[14][i] = 1f;
         }
     }
 }
