@@ -33,6 +33,14 @@ namespace MainCore.UI
             Smoothstep,
         }
 
+        public enum LineFade
+        {
+            /// <summary>一端最亮，逐渐隐没到另一端。</summary>
+            HeadToTail,
+            /// <summary>中间最亮，向两端同时隐没成透明 —— 更像一道光，也会让交叉点更亮。</summary>
+            CenterOut,
+        }
+
         // ------------------------------------------------------------------ 底色
 
         [Header("底色（关掉就叠在场景原有背景上，比如樱花 MainBG）")]
@@ -49,8 +57,8 @@ namespace MainCore.UI
         public Vector2Int linesPerGroup = new Vector2Int(2, 4);
         [Tooltip("单条线长度范围（参考分辨率像素）")]
         public Vector2 lineLength = new Vector2(420f, 1250f);
-        [Tooltip("线宽范围（参考分辨率像素，建议别超过 3）")]
-        public Vector2 lineWidth = new Vector2(1.0f, 2.6f);
+        [Tooltip("线宽范围（参考分辨率像素）")]
+        public Vector2 lineWidth = new Vector2(2.5f, 7.0f);
         [Tooltip("线条颜色；实际亮度还要乘下面的「线条亮度」")]
         public Color lineColor = new Color(0.75f, 0.85f, 1f, 1f);
         [Tooltip("线条最高亮度（0~1）。这是「别糊住文字」最主要的旋钮")]
@@ -59,8 +67,10 @@ namespace MainCore.UI
         [Range(0f, 1f)] public float lineBrightnessJitter = 0.55f;
         [Tooltip("线与线之间的角度分散：0 = 全部平行，1 = 完全自由交叉")]
         [Range(0f, 1f)] public float crossingSpread = 0.85f;
-        [Tooltip("线两端渐隐：亮端保持 100%，暗端衰减到这个比例（0 = 完全隐没）")]
-        [Range(0f, 1f)] public float lineFadeTail = 0.12f;
+        [Tooltip("线条渐变方式")]
+        public LineFade lineFade = LineFade.CenterOut;
+        [Tooltip("线两端渐隐：亮处保持 100%，暗端衰减到这个比例（0 = 完全隐没成透明）")]
+        [Range(0f, 1f)] public float lineFadeTail = 0f;
 
         // ------------------------------------------------------------------ 运动
 
@@ -113,9 +123,12 @@ namespace MainCore.UI
 
         // ------------------------------------------------------------------ 渲染
 
-        [Header("渲染")]
-        [Tooltip("越小越靠后。默认 -100，压在已有 UI（logo / Click to start）之下")]
-        public int sortingOrder = -100;
+        [Header("渲染层")]
+        [Tooltip("相对场景「主 UI Canvas」（装着 Banner / Click to start 的那个）的排序偏移。\n" +
+                 "默认 -1 = 排在它之下，不会盖住文字。")]
+        public int sortingOrderOffset = -1;
+        [Tooltip("找不到主 UI Canvas 时的兜底：改用 ScreenSpaceOverlay 并取这个 sortingOrder")]
+        public int fallbackOverlaySortingOrder = 0;
         [Tooltip("参考分辨率，所有像素尺寸都按它缩放")]
         public Vector2 referenceResolution = new Vector2(1920f, 1080f);
         [Tooltip("随机种子，0 = 每次都不一样")]
@@ -251,14 +264,12 @@ namespace MainCore.UI
 
             var rng = randomSeed == 0 ? new System.Random() : new System.Random(randomSeed);
 
-            // ---- 自建 Canvas（Screen Space Overlay，sortingOrder 很低，压在已有 UI 之下）
+            // ---- 自建 Canvas：必须排在场景主 UI（Banner / Click to start）之下
             //      刻意不加 GraphicRaycaster —— 整层背景绝不拦截点击。
             var canvasGO = new GameObject("SplashLineCanvas", typeof(Canvas), typeof(CanvasScaler));
             canvasGO.transform.SetParent(transform, false);
 
-            var canvas = canvasGO.GetComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = sortingOrder;
+            SetupCanvas(canvasGO.GetComponent<Canvas>());
 
             var scaler = canvasGO.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -342,6 +353,8 @@ namespace MainCore.UI
                 int n = RandomRange(rng, linesPerGroup.x, linesPerGroup.y);
                 float baseAngle = Next(rng, 0f, 360f);
                 float spread = Mathf.Lerp(6f, 170f, Mathf.Clamp01(crossingSpread));
+                // 同一组用统一线宽（组间随机）—— 交叉出来的「网」更整齐
+                float groupWidth = Next(rng, lineWidth.x, lineWidth.y);
 
                 var segs = new List<LineGroupGraphic.Seg>(n);
                 for (int i = 0; i < n; i++)
@@ -355,16 +368,33 @@ namespace MainCore.UI
 
                     // 只做很小的中心偏移，让同组线互相交叉而不是完全共点
                     var off = new Vector2(Next(rng, -0.13f, 0.13f), Next(rng, -0.13f, 0.13f)) * box;
+                    Vector2 pa = off - dir * (len * 0.5f);
+                    Vector2 pb = off + dir * (len * 0.5f);
 
-                    bool flip = rng.Next(2) == 0;
-                    segs.Add(new LineGroupGraphic.Seg
+                    if (lineFade == LineFade.CenterOut)
                     {
-                        a = off - dir * (len * 0.5f),
-                        b = off + dir * (len * 0.5f),
-                        width = Next(rng, lineWidth.x, lineWidth.y),
-                        alphaA = flip ? lineFadeTail : 1f,
-                        alphaB = flip ? 1f : lineFadeTail,
-                    });
+                        // 拆成两半，中间最亮、两端隐没 —— 交叉点自然成为最亮处
+                        segs.Add(new LineGroupGraphic.Seg
+                        {
+                            a = pa, b = off, width = groupWidth,
+                            alphaA = lineFadeTail, alphaB = 1f,
+                        });
+                        segs.Add(new LineGroupGraphic.Seg
+                        {
+                            a = off, b = pb, width = groupWidth,
+                            alphaA = 1f, alphaB = lineFadeTail,
+                        });
+                    }
+                    else
+                    {
+                        bool flip = rng.Next(2) == 0;
+                        segs.Add(new LineGroupGraphic.Seg
+                        {
+                            a = pa, b = pb, width = groupWidth,
+                            alphaA = flip ? lineFadeTail : 1f,
+                            alphaB = flip ? 1f : lineFadeTail,
+                        });
+                    }
                 }
                 gfx.SetSegments(segs);
 
@@ -408,6 +438,58 @@ namespace MainCore.UI
                 vrt.sizeDelta = new Vector2(refW * 1.6f, refH * 1.6f);
                 vrt.anchoredPosition = Vector2.zero;
             }
+        }
+
+        // ------------------------------------------------------------------ canvas
+
+        /// <summary>
+        /// 决定背景层画在哪一层。
+        ///
+        /// ⚠️ 这里**不能**用 ScreenSpaceOverlay：EntryScene 的 UI（Banner / Click to start）
+        /// 挂在 ScreenSpaceCamera 的 Canvas 上，而 **Overlay Canvas 永远渲染在所有相机之上**，
+        /// sortingOrder 再低也不参与比较 —— 底色与暗角会把白色 logo / 文字整片压暗
+        /// （踩过一次：用户反馈「文字看不清」，就是这一条）。
+        ///
+        /// 所以复刻场景主 UI Canvas 的相机与 planeDistance，只把 sortingOrder 压到它下面。
+        /// </summary>
+        private void SetupCanvas(Canvas canvas)
+        {
+            var reference = FindReferenceCanvas();
+
+            if (reference != null)
+            {
+                canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                canvas.worldCamera = reference.worldCamera;        // 为 null 时 Unity 自动用 Camera.main
+                canvas.planeDistance = reference.planeDistance;
+                canvas.sortingOrder = reference.sortingOrder + sortingOrderOffset;
+                return;
+            }
+
+            // 兜底：找不到主 UI Canvas（例如以后换了场景结构）
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = fallbackOverlaySortingOrder;
+        }
+
+        /// <summary>
+        /// 找场景里的「主 UI Canvas」作为排序参照。
+        /// 首选装着 Banner / Click to start 的那个；找不到就取 ScreenSpaceCamera 里 sortingOrder 最小的。
+        /// WorldSpace / ScreenSpaceOverlay 的 Canvas 不能当参照（前者由别的相机渲染，后者永远在最上层）。
+        /// </summary>
+        private static Canvas FindReferenceCanvas()
+        {
+            Canvas best = null;
+            var all = FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+
+            foreach (var c in all)
+            {
+                if (c == null || c.renderMode != RenderMode.ScreenSpaceCamera) continue;
+
+                if (c.transform.Find("Banner") != null || c.transform.Find("Click to start") != null)
+                    return c;
+
+                if (best == null || c.sortingOrder < best.sortingOrder) best = c;
+            }
+            return best;
         }
 
         // ------------------------------------------------------------------ helpers
