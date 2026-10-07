@@ -49,6 +49,9 @@
 # Unity3D generated file
 sysinfo.txt
 
+# Unity Performance Testing 产物（在 Profiler 里跑一次性能测试就会生成，与资产无关）
+/[Aa]ssets/Resources/PerformanceTestRun*
+
 # Builds
 *.apk
 *.aab
