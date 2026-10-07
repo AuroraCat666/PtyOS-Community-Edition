@@ -162,8 +162,10 @@ namespace MainCore
             Debug.Log($"[BlockArea] 块 #{Index}{(Info.isSubtract ? "（减块）" : string.Empty)} " +
                       $"首次可见 @{now:F2}s 中心=({pos.x:F2},{pos.y:F2}) " +
                       $"尺寸=({Mathf.Abs(size.x):F2},{Mathf.Abs(size.y):F2}) " +
-                      $"旋转={(transform.localEulerAngles.z):F1}° localZ={_localZ:F1} " +
-                      $"排序层={(_renderer.sortingLayerName ?? "?")} 启用={_renderer.enabled}");
+                      $"旋转={(transform.localEulerAngles.z):F1}° localZ={_localZ:F1} 世界z={transform.position.z:F1} " +
+                      $"排序层={(_renderer.sortingLayerName ?? "?")}/{_renderer.sortingOrder} " +
+                      $"材质={(_renderer.sharedMaterial != null ? _renderer.sharedMaterial.shader.name : "无")} " +
+                      $"启用={_renderer.enabled}");
         }
 
         // ============ 每帧变换 ============
@@ -173,6 +175,22 @@ namespace MainCore
         {
             _screenWidth = screenWidth;
             _screenHeight = screenHeight;
+        }
+
+        /// <summary>
+        /// 由管理器下发最新的局部 z。
+        ///
+        /// 必须支持中途变更：判定线第一帧跑完才把 JudgeLineTopTransform 挪到
+        /// 世界 z = 0，在那之前管理器只能用相机正前方的安全平面兜底。
+        /// 隐藏态下也要顺手把 Transform 挪过去，否则它会一直停在旧的 z 上。
+        /// </summary>
+        public void SetLocalZ(float localZ)
+        {
+            if (Mathf.Approximately(_localZ, localZ)) return;
+            _localZ = localZ;
+
+            var p = transform.localPosition;
+            transform.localPosition = new Vector3(p.x, p.y, localZ);
         }
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
